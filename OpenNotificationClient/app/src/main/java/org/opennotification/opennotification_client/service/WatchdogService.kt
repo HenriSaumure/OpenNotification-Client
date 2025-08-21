@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.Process
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
@@ -23,6 +24,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.opennotification.opennotification_client.MainActivity
 import org.opennotification.opennotification_client.R
+import org.opennotification.opennotification_client.utils.MemoryPressureHandler
 
 class WatchdogService : Service() {
     companion object {
@@ -52,6 +54,7 @@ class WatchdogService : Service() {
     private lateinit var powerManager: PowerManager
     private lateinit var wakeLock: PowerManager.WakeLock
     private lateinit var webSocketManager: org.opennotification.opennotification_client.network.WebSocketManager
+    private lateinit var memoryPressureHandler: MemoryPressureHandler
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var watchdogJob: Job? = null
 
@@ -62,8 +65,20 @@ class WatchdogService : Service() {
         super.onCreate()
         Log.d(TAG, "WatchdogService created")
 
+        // Set maximum process priority to prevent being killed
+        try {
+            Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
+            // Note: setOomScoreAdj is not available in Android SDK - using other priority mechanisms
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not set maximum priority - continuing with normal priority", e)
+        }
+
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+
+        // Initialize memory pressure protection
+        memoryPressureHandler = MemoryPressureHandler(this)
+        memoryPressureHandler.startProtection()
 
         // Initialize WebSocketManager with context to load saved server URL
         org.opennotification.opennotification_client.network.WebSocketManager.initializeWithContext(this)
@@ -88,6 +103,13 @@ class WatchdogService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "WatchdogService started")
+
+        // Boost priority on each start command
+        try {
+            Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not boost priority on start command", e)
+        }
 
         // Handle shutdown action
         if (intent?.action == ACTION_SHUTDOWN) {
@@ -115,6 +137,9 @@ class WatchdogService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+
+        // Stop memory pressure protection
+        memoryPressureHandler.stopProtection()
 
         // Only log error and restart if shutdown wasn't requested
         if (!isShuttingDown) {
@@ -156,6 +181,14 @@ class WatchdogService : Service() {
                     repository.getActiveListeners().first().size
                 }
                 Log.i(TAG, "App swiped away but $activeListenerCount listeners are active - staying alive")
+
+                // Boost priority to survive memory pressure
+                try {
+                    Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not boost priority after task removal", e)
+                }
+
                 // Use normal notification text instead of custom "monitoring" text
                 updateConsolidatedNotification()
 
@@ -177,6 +210,40 @@ class WatchdogService : Service() {
         }
 
         // DON'T call super to prevent default behavior
+    }
+
+    override fun onTrimMemory(level: Int) {
+        Log.w(TAG, "WatchdogService received memory trim request: $level")
+
+        // Don't call super - we want to resist being trimmed
+        when (level) {
+            TRIM_MEMORY_RUNNING_CRITICAL,
+            TRIM_MEMORY_COMPLETE -> {
+                Log.w(TAG, "Critical memory pressure on WatchdogService - taking defensive action")
+
+                // Boost our priority to maximum
+                try {
+                    Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
+                    // Note: setOomScoreAdj is not available in Android SDK - using thread priority instead
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not boost priority during memory pressure", e)
+                }
+
+                // Force GC to free up any memory we can
+                System.gc()
+
+                // Schedule immediate restart in case we get killed
+                scheduleWatchdogRestart()
+            }
+            else -> {
+                // For other memory trim levels, just boost priority
+                try {
+                    Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not boost priority during moderate memory pressure", e)
+                }
+            }
+        }
     }
 
     private fun handleShutdown() {
@@ -421,7 +488,7 @@ class WatchdogService : Service() {
             )
 
             val alarmManager = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
-            val triggerTime = System.currentTimeMillis() + 2000 // 2 seconds
+            val triggerTime = System.currentTimeMillis() + 1000 // 1 second (reduced for faster recovery)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 alarmManager.setExactAndAllowWhileIdle(
@@ -436,7 +503,7 @@ class WatchdogService : Service() {
                     pendingIntent
                 )
             }
-            Log.i(TAG, "Scheduled watchdog restart")
+            Log.i(TAG, "Scheduled watchdog restart with high-priority alarm")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to schedule watchdog restart", e)
         }

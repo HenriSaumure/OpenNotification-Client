@@ -6,48 +6,59 @@ import android.content.Intent
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import org.opennotification.opennotification_client.data.database.AppDatabase
-import org.opennotification.opennotification_client.repository.NotificationRepository
-import org.opennotification.opennotification_client.service.WebSocketService
+import org.opennotification.opennotification_client.service.WatchdogService
+import org.opennotification.opennotification_client.utils.ConnectionKeepAlive
 
+/**
+ * Boot receiver that ensures services restart after device reboot or app updates
+ */
 class BootReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "BootReceiver"
     }
 
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
     override fun onReceive(context: Context, intent: Intent) {
-        when (intent.action) {
+        val action = intent.action
+        Log.i(TAG, "Boot receiver triggered with action: $action")
+
+        when (action) {
             Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_LOCKED_BOOT_COMPLETED,
+            "android.intent.action.QUICKBOOT_POWERON" -> {
+                Log.i(TAG, "Device boot completed - starting services")
+                startServicesAfterBoot(context)
+            }
             Intent.ACTION_MY_PACKAGE_REPLACED,
             Intent.ACTION_PACKAGE_REPLACED -> {
-                Log.d(TAG, "Device booted or app updated, starting watchdog service")
-
-                try {
-                    // Always start the watchdog service on boot - it will handle monitoring
-                    org.opennotification.opennotification_client.service.WatchdogService.startService(context)
-                    Log.i(TAG, "Watchdog service started after boot")
-
-                    // Also check if we should start WebSocket service for active listeners
-                    CoroutineScope(Dispatchers.IO).launch {
-                        val database = AppDatabase.getDatabase(context)
-                        val repository = NotificationRepository(database)
-
-                        // Get active listeners from database
-                        repository.getActiveListeners().collect { activeListeners ->
-                            if (activeListeners.isNotEmpty()) {
-                                Log.i(TAG, "Found ${activeListeners.size} active listeners, starting WebSocket service after boot")
-                                WebSocketService.startService(context)
-                            } else {
-                                Log.i(TAG, "No active listeners found, watchdog will monitor for changes")
-                            }
-                            // Only collect the first emission and then stop
-                            return@collect
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to start services after boot", e)
+                val packageName = intent.dataString
+                if (packageName?.contains(context.packageName) == true) {
+                    Log.i(TAG, "App updated - restarting services")
+                    startServicesAfterBoot(context)
                 }
+            }
+        }
+    }
+
+    private fun startServicesAfterBoot(context: Context) {
+        scope.launch {
+            try {
+                // Wait a bit for system to stabilize after boot
+                delay(5000)
+
+                Log.i(TAG, "Starting watchdog service after boot")
+                WatchdogService.startService(context)
+
+                // Start keep-alive system
+                ConnectionKeepAlive.startKeepAlive(context)
+
+                Log.i(TAG, "All services started successfully after boot")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error starting services after boot", e)
             }
         }
     }

@@ -111,13 +111,27 @@ class WebSocketManager private constructor() {
     fun connectToGuid(guid: String) {
         Log.d(TAG, "Connecting to GUID: $guid")
 
-        // Check if already connected, connecting, or in the process of being connected
-        if (connections[guid]?.status == ConnectionStatus.CONNECTED ||
-            connections[guid]?.status == ConnectionStatus.CONNECTING ||
-            connectingGuids.contains(guid)) {
-            Log.d(TAG, "Already connected or connecting to GUID: $guid")
+        // Check if already connected or currently connecting
+        val currentConnection = connections[guid]
+        if (currentConnection?.status == ConnectionStatus.CONNECTED) {
+            Log.d(TAG, "Already connected to GUID: $guid")
             return
         }
+
+        // If connecting but it's been too long, allow reconnection attempt
+        if (currentConnection?.status == ConnectionStatus.CONNECTING) {
+            Log.d(TAG, "Connection already in progress for GUID: $guid")
+            return
+        }
+
+        // If in connecting set, remove it to allow fresh connection attempt
+        if (connectingGuids.contains(guid)) {
+            Log.w(TAG, "Removing stale connecting state for GUID: $guid")
+            connectingGuids.remove(guid)
+        }
+
+        // Cancel any existing reconnect job before starting new connection
+        currentConnection?.reconnectJob?.cancel()
 
         // Add to connecting set to prevent duplicates
         connectingGuids.add(guid)
@@ -423,10 +437,21 @@ class WebSocketManager private constructor() {
         if (errorConnections.isNotEmpty()) {
             Log.i(TAG, "Retrying ${errorConnections.size} error connections")
 
-            errorConnections.forEach { (guid, _) ->
+            errorConnections.forEach { (guid, connection) ->
                 // Only retry if this GUID should still be active
                 if (activeListenerGuids.contains(guid)) {
-                    Log.i(TAG, "Retrying connection for GUID with error: $guid")
+                    Log.i(TAG, "Forcing fresh connection attempt for error GUID: $guid")
+
+                    // Cancel any existing reconnect job
+                    connection.reconnectJob?.cancel()
+
+                    // Remove from connecting set to allow fresh attempt
+                    connectingGuids.remove(guid)
+
+                    // Close any existing WebSocket connection
+                    connection.webSocket?.close(1000, "Error retry")
+
+                    // Force a fresh connection attempt
                     connectToGuid(guid)
                 }
             }

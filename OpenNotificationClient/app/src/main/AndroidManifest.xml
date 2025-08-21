@@ -25,6 +25,11 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
+    <!-- Memory pressure resistance permissions -->
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
+    <uses-permission android:name="android.permission.GET_TASKS" />
+    <uses-permission android:name="android.permission.REORDER_TASKS" />
+
     <!-- Prevent the system from stopping the app -->
     <uses-permission android:name="android.permission.REQUEST_COMPANION_RUN_IN_BACKGROUND" />
     <uses-permission android:name="android.permission.REQUEST_COMPANION_USE_DATA_IN_BACKGROUND" />
@@ -128,7 +133,15 @@
             </intent-filter>
         </receiver>
 
-
+        <!-- Resurrection receiver for automatic service revival -->
+        <receiver
+            android:name=".utils.MemoryPressureHandler$ResurrectionReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="org.opennotification.opennotification_client.RESURRECTION" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>
