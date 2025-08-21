@@ -64,6 +64,9 @@ class WatchdogService : Service() {
 
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+
+        // Initialize WebSocketManager with context to load saved server URL
+        org.opennotification.opennotification_client.network.WebSocketManager.initializeWithContext(this)
         webSocketManager = org.opennotification.opennotification_client.network.WebSocketManager.getInstance()
 
         // Acquire wake lock to prevent system from sleeping this service

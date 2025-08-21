@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,6 +35,7 @@ fun MainScreen(
             TopAppBar(
                 title = { Text("OpenNotification Listeners") },
                 actions = {
+                    // Only keep settings button - refresh is now pull-to-refresh
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(
                             imageVector = Icons.Default.Settings,
@@ -93,57 +95,57 @@ fun MainScreen(
                 }
             }
 
-            // Loading indicator
-            if (isLoading) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator()
-                }
-            }
-
-            // Listeners list
-            if (listeners.isEmpty() && !isLoading) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
+            // Pull-to-refresh content
+            PullToRefreshBox(
+                isRefreshing = isLoading,
+                onRefresh = { viewModel.refreshConnections() },
+                modifier = Modifier.fillMaxSize()
+            ) {
+                if (listeners.isEmpty() && !isLoading) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "No listeners added yet",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Tap the + button to add a WebSocket listener",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "No listeners added yet",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Tap the + button to add a WebSocket listener",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "Pull down to refresh connections",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(
-                        items = listeners,
-                        key = { it.id }
-                    ) { listener ->
-                        ListenerItem(
-                            listener = listener,
-                            connectionStatus = connectionStatuses[listener.guid],
-                            onToggleStatus = { viewModel.toggleListenerStatus(listener) },
-                            onDelete = { viewModel.deleteListener(listener) },
-                            onRename = { newName -> viewModel.renameListener(listener, newName) }
-                        )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(
+                            items = listeners,
+                            key = { it.id }
+                        ) { listener ->
+                            ListenerItem(
+                                listener = listener,
+                                connectionStatus = connectionStatuses[listener.guid],
+                                onToggleStatus = { viewModel.toggleListenerStatus(listener) },
+                                onDelete = { viewModel.deleteListener(listener) },
+                                onRename = { newName -> viewModel.renameListener(listener, newName) }
+                            )
+                        }
                     }
                 }
             }

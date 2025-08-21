@@ -44,7 +44,11 @@ class WebSocketService : Service() {
         Log.d(TAG, "WebSocketService created")
 
         repository = NotificationRepository(AppDatabase.getDatabase(this))
+
+        // Initialize WebSocketManager with context to load saved server URL
+        WebSocketManager.initializeWithContext(this)
         webSocketManager = WebSocketManager.getInstance()
+
         notificationDisplayManager = org.opennotification.opennotification_client.utils.NotificationDisplayManager(this)
 
         // Immediately set up notification handler for incoming WebSocket messages

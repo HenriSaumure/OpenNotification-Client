@@ -1,5 +1,7 @@
 package org.opennotification.opennotification_client.network
 
+import android.content.Context
+import android.content.SharedPreferences
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
@@ -29,8 +31,13 @@ import javax.net.ssl.HostnameVerifier
 class WebSocketManager private constructor() {
     companion object {
         private const val TAG = "WebSocketManager"
-        private var BASE_WS_URL = "wss://localhost:7129/ws" // Make this variable instead of const
+        private var BASE_WS_URL = "wss://api.opennotification.org/ws" // Default fallback
         private const val RECONNECT_DELAY = 5000L
+
+        // SharedPreferences constants
+        private const val PREFS_NAME = "opennotification_settings"
+        private const val KEY_SERVER_URL = "server_url"
+        private const val DEFAULT_SERVER_URL = "wss://api.opennotification.org"
 
         @Volatile
         private var INSTANCE: WebSocketManager? = null
@@ -41,6 +48,11 @@ class WebSocketManager private constructor() {
                 INSTANCE = instance
                 instance
             }
+        }
+
+        // Method to initialize with context to load saved settings
+        fun initializeWithContext(context: Context) {
+            getInstance().loadServerUrlFromPreferences(context)
         }
     }
 
@@ -105,13 +117,18 @@ class WebSocketManager private constructor() {
         connectingGuids.add(guid)
         updateConnectionStatus(guid, ConnectionStatus.CONNECTING)
 
+        // Try primary URL first
+        attemptConnection(guid, BASE_WS_URL, true)
+    }
+
+    private fun attemptConnection(guid: String, wsUrl: String, isPrimaryAttempt: Boolean) {
         val request = Request.Builder()
-            .url("$BASE_WS_URL/$guid")
+            .url("$wsUrl/$guid")
             .build()
 
         val webSocketListener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.d(TAG, "WebSocket opened for GUID: $guid")
+                Log.d(TAG, "WebSocket opened for GUID: $guid using URL: $wsUrl")
                 connectingGuids.remove(guid) // Remove from connecting set
                 connections[guid] = connections[guid]?.copy(
                     webSocket = webSocket,
@@ -154,8 +171,18 @@ class WebSocketManager private constructor() {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e(TAG, "WebSocket failure for GUID: $guid", t)
+                Log.e(TAG, "WebSocket failure for GUID: $guid using URL: $wsUrl", t)
                 connectingGuids.remove(guid) // Remove from connecting set
+
+                // Try fallback URL if this was the primary attempt and URL ends with /
+                if (isPrimaryAttempt && wsUrl.endsWith("/")) {
+                    val fallbackUrl = wsUrl.removeSuffix("/")
+                    Log.i(TAG, "Primary connection failed, trying fallback URL: $fallbackUrl")
+                    attemptConnection(guid, fallbackUrl, false)
+                    return
+                }
+
+                // If fallback also fails or no fallback needed, mark as error and schedule reconnect
                 updateConnectionStatus(guid, ConnectionStatus.ERROR)
                 scheduleReconnect(guid)
             }
@@ -253,8 +280,24 @@ class WebSocketManager private constructor() {
     fun updateServerUrl(newBaseUrl: String) {
         Log.i(TAG, "Updating server URL from $BASE_WS_URL to $newBaseUrl")
 
-        // Disconnect all current connections
-        disconnectAll()
+        // Store the currently active GUIDs before disconnecting
+        val activeGuids = connections.keys.toList()
+        Log.i(TAG, "Preserving ${activeGuids.size} active connections for URL change")
+
+        // Disconnect all current connections but don't remove them from tracking
+        activeGuids.forEach { guid ->
+            connections[guid]?.let { connection ->
+                // Cancel any pending reconnection attempts
+                connection.reconnectJob?.cancel()
+                // Close the WebSocket connection
+                connection.webSocket?.close(1000, "Server URL changed")
+                Log.i(TAG, "Disconnected GUID: $guid for URL change")
+            }
+
+            // Keep connection in tracking but mark as disconnected
+            connections[guid] = WebSocketConnection(null, ConnectionStatus.DISCONNECTED, null)
+            updateConnectionStatus(guid, ConnectionStatus.DISCONNECTED)
+        }
 
         // Update the base URL
         BASE_WS_URL = if (newBaseUrl.endsWith("/ws")) {
@@ -265,8 +308,22 @@ class WebSocketManager private constructor() {
 
         Log.i(TAG, "Server URL updated to: $BASE_WS_URL")
 
-        // Note: Active connections will be re-established by the WebSocketService
-        // when it detects the disconnections
+        // Immediately reconnect all previously active listeners with new URL
+        if (activeGuids.isNotEmpty()) {
+            scope.launch {
+                kotlinx.coroutines.delay(500) // Brief delay for clean disconnection
+                Log.i(TAG, "Reconnecting ${activeGuids.size} listeners with new URL")
+
+                activeGuids.forEach { guid ->
+                    if (connections.containsKey(guid)) {
+                        Log.i(TAG, "Reconnecting GUID: $guid to new URL")
+                        connectToGuid(guid)
+                    }
+                }
+
+                Log.i(TAG, "URL change reconnection completed")
+            }
+        }
     }
 
     fun updateActiveListeners(listeners: List<org.opennotification.opennotification_client.data.models.WebSocketListener>) {
@@ -321,5 +378,68 @@ class WebSocketManager private constructor() {
 
     fun hasActiveConnections(): Boolean {
         return connections.isNotEmpty()
+    }
+
+    /**
+     * Force reconnect all active listeners - useful for refresh functionality
+     */
+    fun forceReconnectAll() {
+        Log.i(TAG, "Force reconnecting all active connections")
+        val currentConnections = connections.keys.toList()
+
+        // Disconnect all current connections but keep them in tracking
+        currentConnections.forEach { guid ->
+            Log.i(TAG, "Force disconnecting GUID: $guid for refresh")
+            connections[guid]?.let { connection ->
+                // Cancel any pending reconnection attempts
+                connection.reconnectJob?.cancel()
+                // Close the WebSocket connection
+                connection.webSocket?.close(1000, "Force refresh")
+                Log.i(TAG, "WebSocket connection closed for refresh: $guid")
+            }
+
+            // Update status to disconnected but keep in connections map for reconnection
+            connections[guid] = WebSocketConnection(null, ConnectionStatus.DISCONNECTED, null)
+            updateConnectionStatus(guid, ConnectionStatus.DISCONNECTED)
+        }
+
+        // Schedule immediate reconnection for all disconnected listeners
+        scope.launch {
+            kotlinx.coroutines.delay(500) // Brief delay to ensure clean disconnection
+            Log.i(TAG, "Starting forced reconnection for ${currentConnections.size} listeners")
+
+            currentConnections.forEach { guid ->
+                // Only reconnect if still in connections (meaning it should be active)
+                if (connections.containsKey(guid)) {
+                    Log.i(TAG, "Force reconnecting GUID: $guid")
+                    connectToGuid(guid)
+                }
+            }
+
+            Log.i(TAG, "Force reconnect completed for all active listeners")
+        }
+    }
+    /**
+     * Load server URL from SharedPreferences
+     */
+    private fun loadServerUrlFromPreferences(context: Context) {
+        try {
+            val sharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val savedUrl = sharedPreferences.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL) ?: DEFAULT_SERVER_URL
+
+            // Update the base URL if it's different from default
+            if (savedUrl != DEFAULT_SERVER_URL) {
+                BASE_WS_URL = if (savedUrl.endsWith("/ws")) {
+                    savedUrl
+                } else {
+                    "$savedUrl/ws"
+                }
+                Log.i(TAG, "Loaded server URL from preferences: $BASE_WS_URL")
+            } else {
+                Log.d(TAG, "Using default server URL: $BASE_WS_URL")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading server URL from preferences, using default", e)
+        }
     }
 }

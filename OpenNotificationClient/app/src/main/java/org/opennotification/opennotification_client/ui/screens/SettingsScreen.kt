@@ -128,9 +128,16 @@ fun SettingsScreen(
                         value = newServerUrl,
                         onValueChange = { newServerUrl = it },
                         label = { Text("WebSocket Server URL") },
-                        placeholder = { Text("wss://example.com:port") },
+                        placeholder = { Text("https://example.com or wss://example.com") },
                         modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
+                        singleLine = true,
+                        supportingText = {
+                            Text(
+                                text = "Tip: https:// URLs will be automatically converted to wss://",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     )
 
                     Button(

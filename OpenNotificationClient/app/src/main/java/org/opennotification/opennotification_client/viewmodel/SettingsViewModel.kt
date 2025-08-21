@@ -18,7 +18,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         private const val TAG = "SettingsViewModel"
         private const val PREFS_NAME = "opennotification_settings"
         private const val KEY_SERVER_URL = "server_url"
-        private const val DEFAULT_SERVER_URL = "wss://localhost:7129"
+        private const val DEFAULT_SERVER_URL = "wss://api.opennotification.org"
     }
 
     private val context = application.applicationContext
@@ -53,18 +53,20 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             try {
                 val cleanUrl = newUrl.trim()
-                if (isValidWebSocketUrl(cleanUrl)) {
+                val webSocketUrl = convertToWebSocketUrl(cleanUrl)
+
+                if (isValidWebSocketUrl(webSocketUrl)) {
                     // Save to preferences
                     sharedPreferences.edit()
-                        .putString(KEY_SERVER_URL, cleanUrl)
+                        .putString(KEY_SERVER_URL, webSocketUrl)
                         .apply()
 
-                    _serverUrl.value = cleanUrl
+                    _serverUrl.value = webSocketUrl
 
                     // Update WebSocketManager with new URL
-                    webSocketManager.updateServerUrl(cleanUrl)
+                    webSocketManager.updateServerUrl(webSocketUrl)
 
-                    Log.i(TAG, "Server URL updated to: $cleanUrl")
+                    Log.i(TAG, "Server URL updated to: $webSocketUrl")
                 } else {
                     Log.w(TAG, "Invalid server URL: $newUrl")
                 }
@@ -107,6 +109,21 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             Log.d(TAG, "Battery settings should be opened")
         } catch (e: Exception) {
             Log.e(TAG, "Error opening battery settings", e)
+        }
+    }
+
+    private fun convertToWebSocketUrl(url: String): String {
+        val trimmedUrl = url.trim()
+
+        // Convert https:// to wss:// and http:// to ws://
+        return when {
+            trimmedUrl.startsWith("https://") -> trimmedUrl.replace("https://", "wss://")
+            trimmedUrl.startsWith("http://") -> trimmedUrl.replace("http://", "ws://")
+            trimmedUrl.startsWith("wss://") || trimmedUrl.startsWith("ws://") -> trimmedUrl
+            else -> {
+                // If no protocol specified, assume secure WebSocket
+                if (trimmedUrl.isNotEmpty()) "wss://$trimmedUrl" else trimmedUrl
+            }
         }
     }
 

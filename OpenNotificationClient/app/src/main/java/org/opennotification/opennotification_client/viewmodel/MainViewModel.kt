@@ -147,6 +147,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Force refresh all connections - disconnects and reconnects all active listeners
+     */
+    fun refreshConnections() {
+        viewModelScope.launch {
+            try {
+                _isLoading.value = true
+                Log.i("MainViewModel", "Refreshing all WebSocket connections")
+
+                // Force reconnect all active connections
+                webSocketManager.forceReconnectAll()
+
+                // Wait for the reconnection process to complete
+                // Give it a reasonable time to reconnect (the forceReconnectAll has a 500ms delay + connection time)
+                kotlinx.coroutines.delay(2000) // 2 seconds should be enough for most reconnections
+
+                _errorMessage.value = null
+                Log.i("MainViewModel", "Connection refresh completed")
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Error refreshing connections", e)
+                _errorMessage.value = "Failed to refresh connections: ${e.message}"
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
     fun clearError() {
         _errorMessage.value = null
     }
