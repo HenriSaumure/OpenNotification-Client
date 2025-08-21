@@ -81,6 +81,9 @@ class WatchdogService : Service() {
 
         Log.i(TAG, "Starting watchdog monitoring")
         startWatchdog()
+
+        // Start battery-efficient keep-alive system
+        org.opennotification.opennotification_client.utils.ConnectionKeepAlive.startKeepAlive(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -180,6 +183,9 @@ class WatchdogService : Service() {
         try {
             // Set shutdown flag to prevent restarts
             isShuttingDown = true
+
+            // Stop battery-efficient keep-alive system
+            org.opennotification.opennotification_client.utils.ConnectionKeepAlive.stopKeepAlive(applicationContext)
 
             // Stop WebSocket service
             WebSocketService.stopService(applicationContext)

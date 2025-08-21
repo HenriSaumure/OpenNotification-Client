@@ -15,7 +15,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -39,6 +41,7 @@ fun ListenerItem(
     var showFullGuid by remember { mutableStateOf(false) }
 
     val clipboardManager = LocalClipboardManager.current
+    val hapticFeedback = LocalHapticFeedback.current
 
     // Force recomposition when connection status changes
     val currentConnectionStatus by remember(connectionStatus) { mutableStateOf(connectionStatus) }
@@ -52,7 +55,10 @@ fun ListenerItem(
             .fillMaxWidth()
             .combinedClickable(
                 onClick = { showFullGuid = !showFullGuid },
-                onLongClick = { showContextMenu = true },
+                onLongClick = {
+                    hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                    showContextMenu = true
+                },
                 onDoubleClick = {
                     // Copy GUID to clipboard
                     clipboardManager.setText(AnnotatedString(listener.guid))

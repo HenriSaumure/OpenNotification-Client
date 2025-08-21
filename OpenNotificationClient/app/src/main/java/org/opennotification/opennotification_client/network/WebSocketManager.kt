@@ -96,11 +96,17 @@ class WebSocketManager private constructor() {
     // Callback for receiving notifications
     var onNotificationReceived: ((Notification) -> Unit)? = null
 
+    // Keep track of active listeners for automatic error retry
+    private val activeListenerGuids = ConcurrentHashMap.newKeySet<String>()
+
     data class WebSocketConnection(
         val webSocket: WebSocket?,
         val status: ConnectionStatus,
         val reconnectJob: Job?
     )
+
+    // Battery-efficient approach: No continuous background monitoring
+    // Keep-alive and error retry is handled by alarm-based system
 
     fun connectToGuid(guid: String) {
         Log.d(TAG, "Connecting to GUID: $guid")
@@ -334,6 +340,10 @@ class WebSocketManager private constructor() {
             // Get GUIDs that should be active
             val activeGuids = listeners.filter { it.isActive }.map { it.guid }.toSet()
 
+            // Update the active listeners tracking for error retry monitor
+            activeListenerGuids.clear()
+            activeListenerGuids.addAll(activeGuids)
+
             Log.i(TAG, "Updating active listeners:")
             Log.i(TAG, "  Current connections: ${currentGuids.joinToString()}")
             Log.i(TAG, "  Should be active: ${activeGuids.joinToString()}")
@@ -381,6 +391,56 @@ class WebSocketManager private constructor() {
     }
 
     /**
+     * Send keep-alive pings to all connected WebSockets (called by alarm)
+     */
+    fun sendKeepAlivePings() {
+        Log.d(TAG, "Sending keep-alive pings to ${connections.size} connections")
+
+        connections.forEach { (guid, connection) ->
+            try {
+                if (connection.status == ConnectionStatus.CONNECTED && connection.webSocket != null) {
+                    val pingResult = connection.webSocket.send("ping")
+                    if (pingResult) {
+                        Log.v(TAG, "Keep-alive ping sent to GUID: $guid")
+                    } else {
+                        Log.w(TAG, "Failed to send keep-alive ping to GUID: $guid")
+                        updateConnectionStatus(guid, ConnectionStatus.ERROR)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error sending keep-alive ping to GUID: $guid", e)
+                updateConnectionStatus(guid, ConnectionStatus.ERROR)
+            }
+        }
+    }
+
+    /**
+     * Retry connections that are in ERROR state and should be active (called by alarm)
+     */
+    fun retryErrorConnections() {
+        val errorConnections = connections.filterValues { it.status == ConnectionStatus.ERROR }
+
+        if (errorConnections.isNotEmpty()) {
+            Log.i(TAG, "Retrying ${errorConnections.size} error connections")
+
+            errorConnections.forEach { (guid, _) ->
+                // Only retry if this GUID should still be active
+                if (activeListenerGuids.contains(guid)) {
+                    Log.i(TAG, "Retrying connection for GUID with error: $guid")
+                    connectToGuid(guid)
+                }
+            }
+        }
+    }
+
+    /**
+     * Get connections that are in ERROR state
+     */
+    fun getErrorConnections(): List<String> {
+        return connections.filterValues { it.status == ConnectionStatus.ERROR }.keys.toList()
+    }
+
+    /**
      * Force reconnect all active listeners - useful for refresh functionality
      */
     fun forceReconnectAll() {
@@ -419,6 +479,7 @@ class WebSocketManager private constructor() {
             Log.i(TAG, "Force reconnect completed for all active listeners")
         }
     }
+
     /**
      * Load server URL from SharedPreferences
      */
