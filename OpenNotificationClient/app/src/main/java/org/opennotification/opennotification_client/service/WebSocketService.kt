@@ -93,7 +93,7 @@ class WebSocketService : Service() {
 
         // Only restart if we have active connections and we're not stopping intentionally
         if (hasActiveConnections && !isStoppingSelf) {
-            Log.d(TAG, "WebSocketService destroyed with active connections - will be restarted by watchdog if needed")
+            Log.d(TAG, "WebSocketService destroyed with active connections - will restart automatically if needed")
         } else {
             Log.d(TAG, "WebSocketService destroyed - no restart needed (stopping self: $isStoppingSelf, active connections: $hasActiveConnections)")
         }
@@ -108,7 +108,7 @@ class WebSocketService : Service() {
 
             if (hasActiveConnections) {
                 Log.i(TAG, "Active WebSocket connections found - service will continue running")
-                // The watchdog service will monitor and restart if needed
+                // Service will continue to monitor connections as needed
                 // No need for aggressive restart logic here
             } else {
                 Log.i(TAG, "No active connections - allowing service to stop naturally")

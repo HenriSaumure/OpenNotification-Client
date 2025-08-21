@@ -7,51 +7,56 @@ import org.opennotification.opennotification_client.data.models.WebSocketListene
 
 class NotificationRepository(private val database: AppDatabase) {
 
-    fun getAllNotifications(): Flow<List<Notification>> {
-        return database.notificationDao().getAllNotifications()
-    }
+    private val notificationDao = database.notificationDao()
+    private val listenerDao = database.webSocketListenerDao()
 
-    fun getNotificationsByGuid(guid: String): Flow<List<Notification>> {
-        return database.notificationDao().getNotificationsByGuid(guid)
+    // Notification operations
+    fun getAllNotifications(): Flow<List<Notification>> {
+        return notificationDao.getAllNotifications()
     }
 
     suspend fun insertNotification(notification: Notification) {
-        database.notificationDao().insertNotification(notification)
+        notificationDao.insertNotification(notification)
     }
 
     suspend fun deleteNotification(notification: Notification) {
-        database.notificationDao().deleteNotification(notification)
+        notificationDao.deleteNotification(notification)
     }
 
-    suspend fun deleteNotificationsByGuid(guid: String) {
-        database.notificationDao().deleteNotificationsByGuid(guid)
+    suspend fun deleteAllNotifications() {
+        notificationDao.deleteAllNotifications()
     }
 
+    suspend fun getNotificationCount(): Int {
+        return notificationDao.getNotificationCount()
+    }
+
+    // WebSocket Listener operations
     fun getAllListeners(): Flow<List<WebSocketListener>> {
-        return database.webSocketListenerDao().getAllListeners()
+        return listenerDao.getAllListeners()
     }
 
     fun getActiveListeners(): Flow<List<WebSocketListener>> {
-        return database.webSocketListenerDao().getActiveListeners()
+        return listenerDao.getActiveListeners()
     }
 
     suspend fun insertListener(listener: WebSocketListener) {
-        database.webSocketListenerDao().insertListener(listener)
+        listenerDao.insertListener(listener)
     }
 
     suspend fun updateListener(listener: WebSocketListener) {
-        database.webSocketListenerDao().updateListener(listener)
+        listenerDao.updateListener(listener)
     }
 
     suspend fun deleteListener(listener: WebSocketListener) {
-        database.webSocketListenerDao().deleteListener(listener)
+        listenerDao.deleteListener(listener)
     }
 
-    suspend fun updateListenerStatus(id: String, isActive: Boolean) {
-        database.webSocketListenerDao().updateListenerStatus(id, isActive)
+    suspend fun deleteAllListeners() {
+        listenerDao.deleteAllListeners()
     }
 
     suspend fun getListenerByGuid(guid: String): WebSocketListener? {
-        return database.webSocketListenerDao().getListenerByGuid(guid)
+        return listenerDao.getListenerByGuid(guid)
     }
 }

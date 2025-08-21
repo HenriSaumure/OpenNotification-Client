@@ -31,13 +31,13 @@ import javax.net.ssl.HostnameVerifier
 class WebSocketManager private constructor() {
     companion object {
         private const val TAG = "WebSocketManager"
-        private var BASE_WS_URL = "wss://api.opennotification.org/ws" // Default fallback
+        private var BASE_WS_URL = "wss://api.opennotification.org/ws" // Updated default URL
         private const val RECONNECT_DELAY = 5000L
 
         // SharedPreferences constants
         private const val PREFS_NAME = "opennotification_settings"
         private const val KEY_SERVER_URL = "server_url"
-        private const val DEFAULT_SERVER_URL = "wss://api.opennotification.org"
+        private const val DEFAULT_SERVER_URL = "https://api.opennotification.org" // Updated default URL
 
         @Volatile
         private var INSTANCE: WebSocketManager? = null
@@ -441,39 +441,46 @@ class WebSocketManager private constructor() {
     }
 
     /**
-     * Force reconnect all active listeners - useful for refresh functionality
+     * Force reconnect all active connections - disconnects and reconnects all current connections
      */
     fun forceReconnectAll() {
         Log.i(TAG, "Force reconnecting all active connections")
-        val currentConnections = connections.keys.toList()
 
-        // Disconnect all current connections but keep them in tracking
-        currentConnections.forEach { guid ->
-            Log.i(TAG, "Force disconnecting GUID: $guid for refresh")
+        // Get all current connection GUIDs
+        val activeGuids = connections.keys.toList()
+
+        // Disconnect all connections first
+        activeGuids.forEach { guid ->
             connections[guid]?.let { connection ->
                 // Cancel any pending reconnection attempts
                 connection.reconnectJob?.cancel()
                 // Close the WebSocket connection
-                connection.webSocket?.close(1000, "Force refresh")
-                Log.i(TAG, "WebSocket connection closed for refresh: $guid")
+                connection.webSocket?.close(1000, "Force reconnect")
+                Log.i(TAG, "WebSocket connection closed for GUID: $guid")
             }
 
-            // Update status to disconnected but keep in connections map for reconnection
-            connections[guid] = WebSocketConnection(null, ConnectionStatus.DISCONNECTED, null)
-            updateConnectionStatus(guid, ConnectionStatus.DISCONNECTED)
+            // Remove from connections map
+            connections.remove(guid)
+            // Remove from connecting set if it was in there
+            connectingGuids.remove(guid)
+
+            // Update status to disconnected
+            val currentStatuses = _connectionStatuses.value.toMutableMap()
+            currentStatuses.remove(guid)
+            _connectionStatuses.value = currentStatuses
+
+            Log.i(TAG, "WebSocket connection and status tracking removed for GUID: $guid")
         }
 
-        // Schedule immediate reconnection for all disconnected listeners
+        // Give a moment for disconnections to complete, then reconnect
         scope.launch {
-            kotlinx.coroutines.delay(500) // Brief delay to ensure clean disconnection
-            Log.i(TAG, "Starting forced reconnection for ${currentConnections.size} listeners")
+            kotlinx.coroutines.delay(500) // Wait 500ms for clean disconnection
 
-            currentConnections.forEach { guid ->
-                // Only reconnect if still in connections (meaning it should be active)
-                if (connections.containsKey(guid)) {
-                    Log.i(TAG, "Force reconnecting GUID: $guid")
-                    connectToGuid(guid)
-                }
+            Log.i(TAG, "Starting forced reconnection for ${activeGuids.size} listeners")
+
+            // Reconnect to all previously active GUIDs
+            activeGuids.forEach { guid ->
+                connectToGuid(guid)
             }
 
             Log.i(TAG, "Force reconnect completed for all active listeners")

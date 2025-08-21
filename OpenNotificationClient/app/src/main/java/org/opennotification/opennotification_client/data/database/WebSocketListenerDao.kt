@@ -14,11 +14,8 @@ interface WebSocketListenerDao {
     @Query("SELECT * FROM websocket_listeners ORDER BY createdAt DESC")
     fun getAllListeners(): Flow<List<WebSocketListener>>
 
-    @Query("SELECT * FROM websocket_listeners WHERE isActive = 1 ORDER BY createdAt DESC")
+    @Query("SELECT * FROM websocket_listeners WHERE isActive = 1")
     fun getActiveListeners(): Flow<List<WebSocketListener>>
-
-    @Query("SELECT * FROM websocket_listeners WHERE guid = :guid LIMIT 1")
-    suspend fun getListenerByGuid(guid: String): WebSocketListener?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertListener(listener: WebSocketListener)
@@ -29,12 +26,9 @@ interface WebSocketListenerDao {
     @Delete
     suspend fun deleteListener(listener: WebSocketListener)
 
-    @Query("UPDATE websocket_listeners SET isActive = :isActive WHERE id = :id")
-    suspend fun updateListenerStatus(id: String, isActive: Boolean)
-
-    @Query("UPDATE websocket_listeners SET lastConnected = :timestamp WHERE id = :id")
-    suspend fun updateLastConnected(id: String, timestamp: Long)
-
     @Query("DELETE FROM websocket_listeners")
     suspend fun deleteAllListeners()
+
+    @Query("SELECT * FROM websocket_listeners WHERE guid = :guid LIMIT 1")
+    suspend fun getListenerByGuid(guid: String): WebSocketListener?
 }

@@ -14,7 +14,6 @@ import org.opennotification.opennotification_client.data.models.Notification
 import org.opennotification.opennotification_client.network.WebSocketManager
 import org.opennotification.opennotification_client.repository.NotificationRepository
 import org.opennotification.opennotification_client.service.WebSocketService
-import org.opennotification.opennotification_client.service.WatchdogService
 import java.util.UUID
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -33,12 +32,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     init {
-        // Don't start the WebSocket service automatically - only start when needed
-        Log.i("MainViewModel", "ViewModel initialized")
+        // Battery-optimized initialization - only start services when needed
+        Log.i("MainViewModel", "ViewModel initialized with battery optimization")
 
-        // Start the watchdog service immediately - it will monitor and restart WebSocket service as needed
-        WatchdogService.startService(getApplication())
-        Log.i("MainViewModel", "Watchdog service started")
+        // Start battery-efficient keep-alive system
+        org.opennotification.opennotification_client.utils.ConnectionKeepAlive.startKeepAlive(getApplication())
 
         // Monitor active listeners and ensure WebSocket connections
         viewModelScope.launch {
@@ -51,75 +49,51 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     Log.d("MainViewModel", "Starting WebSocket service for ${activeListeners.size} active listeners")
                     WebSocketService.startService(getApplication())
                 } else {
-                    Log.d("MainViewModel", "No active listeners - WebSocket service will stop itself")
-                    // Don't explicitly stop the service here - let it stop itself when it detects no active listeners
-                    // This prevents race conditions and crashes
+                    Log.d("MainViewModel", "No active listeners - stopping WebSocket service to save battery")
+                    WebSocketService.stopService(getApplication())
                 }
-
-                // Always update WebSocketManager, regardless of count
-                webSocketManager.updateActiveListeners(activeListeners)
-                Log.d("MainViewModel", "Updated WebSocketManager with ${activeListeners.size} active listeners")
             }
         }
     }
 
-    fun addNewListener(guid: String, name: String?) {
+    fun addListener(name: String, guid: String) {
         viewModelScope.launch {
             try {
                 _isLoading.value = true
-                _errorMessage.value = null
-
-                // Validate GUID format
-                if (!isValidGuid(guid)) {
-                    _errorMessage.value = "Invalid GUID format"
-                    return@launch
-                }
-
-                // Check if listener already exists
-                val existingListener = repository.getListenerByGuid(guid)
-                if (existingListener != null) {
-                    _errorMessage.value = "Listener for this GUID already exists"
-                    return@launch
-                }
-
                 val listener = WebSocketListener(
                     guid = guid,
-                    name = name?.takeIf { it.isNotBlank() } ?: "Listener ${guid.take(8)}"
+                    name = name,
+                    isActive = true
                 )
-
                 repository.insertListener(listener)
-
+                _errorMessage.value = null
+                Log.i("MainViewModel", "Listener added: $name ($guid)")
             } catch (e: Exception) {
                 _errorMessage.value = "Failed to add listener: ${e.message}"
+                Log.e("MainViewModel", "Error adding listener", e)
             } finally {
                 _isLoading.value = false
             }
         }
     }
 
-    fun toggleListenerStatus(listener: WebSocketListener) {
+    fun generateNewGuid(): String {
+        return UUID.randomUUID().toString()
+    }
+
+    fun toggleListener(listener: WebSocketListener) {
         viewModelScope.launch {
             try {
-                val newStatus = !listener.isActive
-                Log.d("MainViewModel", "Toggling listener status for ${listener.guid}: ${listener.isActive} -> $newStatus")
-
-                repository.updateListenerStatus(listener.id, newStatus)
-
-                Log.d("MainViewModel", "Listener status updated in database for ${listener.guid}: isActive = $newStatus")
-
-                // If we're activating a listener, ensure the WebSocket service is running
-                if (newStatus) {
-                    Log.d("MainViewModel", "Listener activated - starting WebSocket service")
-                    WebSocketService.startService(getApplication())
-                }
-
-                // Force refresh of active listeners
-                val updatedListeners = repository.getAllListeners()
-                Log.d("MainViewModel", "Triggering WebSocket manager update after status change")
-
+                _isLoading.value = true
+                val updatedListener = listener.copy(isActive = !listener.isActive)
+                repository.updateListener(updatedListener)
+                _errorMessage.value = null
+                Log.i("MainViewModel", "Listener toggled: ${listener.name} -> active=${updatedListener.isActive}")
             } catch (e: Exception) {
-                Log.e("MainViewModel", "Failed to update listener status for ${listener.guid}: ${e.message}", e)
-                _errorMessage.value = "Failed to update listener status: ${e.message}"
+                _errorMessage.value = "Failed to toggle listener: ${e.message}"
+                Log.e("MainViewModel", "Error toggling listener", e)
+            } finally {
+                _isLoading.value = false
             }
         }
     }
@@ -127,22 +101,77 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteListener(listener: WebSocketListener) {
         viewModelScope.launch {
             try {
+                _isLoading.value = true
                 repository.deleteListener(listener)
-                // Also delete associated notifications
-                repository.deleteNotificationsByGuid(listener.guid)
+                _errorMessage.value = null
+                Log.i("MainViewModel", "Listener deleted: ${listener.name}")
             } catch (e: Exception) {
                 _errorMessage.value = "Failed to delete listener: ${e.message}"
+                Log.e("MainViewModel", "Error deleting listener", e)
+            } finally {
+                _isLoading.value = false
             }
         }
+    }
+
+    fun deleteAllNotifications() {
+        viewModelScope.launch {
+            try {
+                _isLoading.value = true
+                // Call the repository method to delete all notifications
+                repository.deleteAllNotifications()
+                _errorMessage.value = null
+                Log.i("MainViewModel", "All notifications deleted")
+            } catch (e: Exception) {
+                _errorMessage.value = "Failed to delete notifications: ${e.message}"
+                Log.e("MainViewModel", "Error deleting notifications", e)
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    fun deleteNotification(notification: Notification) {
+        viewModelScope.launch {
+            try {
+                repository.deleteNotification(notification)
+                Log.i("MainViewModel", "Notification deleted: ${notification.title}")
+            } catch (e: Exception) {
+                _errorMessage.value = "Failed to delete notification: ${e.message}"
+                Log.e("MainViewModel", "Error deleting notification", e)
+            }
+        }
+    }
+
+    fun clearErrorMessage() {
+        _errorMessage.value = null
+    }
+
+    // UI-friendly method names that match the MainScreen expectations
+    fun clearError() {
+        clearErrorMessage()
+    }
+
+    fun toggleListenerStatus(listener: WebSocketListener) {
+        toggleListener(listener)
+    }
+
+    fun addNewListener(guid: String, name: String?) {
+        addListener(name ?: "Unnamed Listener", guid)
     }
 
     fun renameListener(listener: WebSocketListener, newName: String) {
         viewModelScope.launch {
             try {
-                val updatedListener = listener.copy(name = newName.trim())
+                _isLoading.value = true
+                val updatedListener = listener.copy(name = newName)
                 repository.updateListener(updatedListener)
+                _errorMessage.value = null
+                Log.i("MainViewModel", "Listener renamed: ${listener.name} -> $newName")
             } catch (e: Exception) {
                 _errorMessage.value = "Failed to rename listener: ${e.message}"
+            } finally {
+                _isLoading.value = false
             }
         }
     }
@@ -172,24 +201,5 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _isLoading.value = false
             }
         }
-    }
-
-    fun clearError() {
-        _errorMessage.value = null
-    }
-
-    private fun isValidGuid(guid: String): Boolean {
-        return try {
-            UUID.fromString(guid)
-            true
-        } catch (e: IllegalArgumentException) {
-            false
-        }
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        // Stop the service when ViewModel is cleared (app is closed)
-        WebSocketService.stopService(getApplication())
     }
 }
