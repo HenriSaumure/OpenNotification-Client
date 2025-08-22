@@ -30,10 +30,8 @@ class NotificationActionReceiver : BroadcastReceiver() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val repository = NotificationRepository(AppDatabase.getDatabase(context))
-                // You could add a "read" status to your notification model if needed
                 Log.d(TAG, "Marked notification as read: $notificationId")
 
-                // Cancel the notification from the notification panel
                 val notificationManager = NotificationDisplayManager(context)
                 notificationManager.cancelNotification(notificationId.hashCode())
             } catch (e: Exception) {

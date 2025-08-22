@@ -32,19 +32,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     init {
-        // Battery-optimized initialization - only start services when needed
         Log.i("MainViewModel", "ViewModel initialized with battery optimization")
 
-        // Start battery-efficient keep-alive system
         org.opennotification.opennotification_client.utils.ConnectionKeepAlive.startKeepAlive(getApplication())
 
-        // Monitor active listeners and ensure WebSocket connections
         viewModelScope.launch {
             allListeners.collect { listeners ->
                 val activeListeners = listeners.filter { it.isActive }
                 Log.d("MainViewModel", "Listeners changed: Total=${listeners.size}, Active=${activeListeners.size}")
 
-                // Only start WebSocket service if there are active listeners
                 if (activeListeners.isNotEmpty()) {
                     Log.d("MainViewModel", "Starting WebSocket service for ${activeListeners.size} active listeners")
                     WebSocketService.startService(getApplication())
@@ -118,7 +114,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 _isLoading.value = true
-                // Call the repository method to delete all notifications
                 repository.deleteAllNotifications()
                 _errorMessage.value = null
                 Log.i("MainViewModel", "All notifications deleted")
@@ -143,13 +138,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun clearErrorMessage() {
-        _errorMessage.value = null
-    }
-
-    // UI-friendly method names that match the MainScreen expectations
     fun clearError() {
-        clearErrorMessage()
+        _errorMessage.value = null
     }
 
     fun toggleListenerStatus(listener: WebSocketListener) {
@@ -176,21 +166,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * Force refresh all connections - disconnects and reconnects all active listeners
-     */
     fun refreshConnections() {
         viewModelScope.launch {
             try {
                 _isLoading.value = true
                 Log.i("MainViewModel", "Refreshing all WebSocket connections")
 
-                // Force reconnect all active connections
                 webSocketManager.forceReconnectAll()
 
-                // Wait for the reconnection process to complete
-                // Give it a reasonable time to reconnect (the forceReconnectAll has a 500ms delay + connection time)
-                kotlinx.coroutines.delay(2000) // 2 seconds should be enough for most reconnections
+                kotlinx.coroutines.delay(2000)
 
                 _errorMessage.value = null
                 Log.i("MainViewModel", "Connection refresh completed")

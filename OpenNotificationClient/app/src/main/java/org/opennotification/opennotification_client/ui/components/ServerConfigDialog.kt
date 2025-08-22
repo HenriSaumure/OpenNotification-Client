@@ -67,7 +67,6 @@ fun ServerConfigDialog(
                     }
                 )
 
-                // Protocol information
                 Card(
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant

@@ -12,20 +12,14 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import org.opennotification.opennotification_client.network.WebSocketManager
 
-/**
- * Battery-efficient connection monitoring using AlarmManager similar to Signal app
- */
 class ConnectionKeepAlive {
     companion object {
         private const val TAG = "ConnectionKeepAlive"
-        private const val KEEP_ALIVE_INTERVAL = 19995L // ~20 seconds, similar to Signal
+        private const val KEEP_ALIVE_INTERVAL = 19995L
         const val ACTION_KEEP_ALIVE = "org.opennotification.opennotification_client.KEEP_ALIVE"
 
         private var isKeepAliveScheduled = false
 
-        /**
-         * Start the keep-alive alarm system
-         */
         fun startKeepAlive(context: Context) {
             if (isKeepAliveScheduled) {
                 Log.d(TAG, "Keep-alive already scheduled")
@@ -37,9 +31,6 @@ class ConnectionKeepAlive {
             isKeepAliveScheduled = true
         }
 
-        /**
-         * Stop the keep-alive alarm system
-         */
         fun stopKeepAlive(context: Context) {
             Log.i(TAG, "Stopping keep-alive alarm system")
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
@@ -48,9 +39,6 @@ class ConnectionKeepAlive {
             isKeepAliveScheduled = false
         }
 
-        /**
-         * Schedule the next keep-alive check
-         */
         fun scheduleNextKeepAlive(context: Context) {
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             val pendingIntent = getKeepAlivePendingIntent(context)
@@ -70,9 +58,6 @@ class ConnectionKeepAlive {
             }
         }
 
-        /**
-         * Get PendingIntent for keep-alive alarms
-         */
         private fun getKeepAlivePendingIntent(context: Context): PendingIntent {
             val intent = Intent(context, KeepAliveReceiver::class.java).apply {
                 action = ACTION_KEEP_ALIVE
@@ -85,9 +70,6 @@ class ConnectionKeepAlive {
     }
 }
 
-/**
- * BroadcastReceiver that handles keep-alive alarms
- */
 class KeepAliveReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "KeepAliveReceiver"
@@ -104,22 +86,15 @@ class KeepAliveReceiver : BroadcastReceiver() {
         }
     }
 
-    /**
-     * Handle keep-alive check and send WebSocket pings
-     */
     private fun handleKeepAlive(context: Context) {
         scope.launch {
             try {
                 Log.d(TAG, "Sending keep-alive")
                 val webSocketManager = WebSocketManager.getInstance()
 
-                // Send keep-alive pings to all connected WebSockets
                 webSocketManager.sendKeepAlivePings()
-
-                // Check for error connections and retry if needed (only if active)
                 webSocketManager.retryErrorConnections()
 
-                // Schedule next keep-alive only if we still have active connections
                 if (webSocketManager.hasActiveConnections()) {
                     ConnectionKeepAlive.scheduleNextKeepAlive(context)
                 } else {
@@ -129,7 +104,6 @@ class KeepAliveReceiver : BroadcastReceiver() {
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error in keep-alive handler", e)
-                // Still schedule next keep-alive even if this one failed, but only if we have connections
                 try {
                     val webSocketManager = WebSocketManager.getInstance()
                     if (webSocketManager.hasActiveConnections()) {

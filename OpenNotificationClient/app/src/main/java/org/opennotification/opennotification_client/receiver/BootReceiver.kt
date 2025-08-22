@@ -12,9 +12,6 @@ import kotlinx.coroutines.launch
 import org.opennotification.opennotification_client.service.WatchdogService
 import org.opennotification.opennotification_client.utils.ConnectionKeepAlive
 
-/**
- * Boot receiver that ensures services restart after device reboot or app updates
- */
 class BootReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "BootReceiver"
@@ -47,15 +44,10 @@ class BootReceiver : BroadcastReceiver() {
     private fun startServicesAfterBoot(context: Context) {
         scope.launch {
             try {
-                // Wait a bit for system to stabilize after boot
                 delay(5000)
-
                 Log.i(TAG, "Starting watchdog service after boot")
                 WatchdogService.startService(context)
-
-                // Start keep-alive system
                 ConnectionKeepAlive.startKeepAlive(context)
-
                 Log.i(TAG, "All services started successfully after boot")
             } catch (e: Exception) {
                 Log.e(TAG, "Error starting services after boot", e)

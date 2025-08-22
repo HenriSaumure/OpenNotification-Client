@@ -35,26 +35,22 @@ fun SettingsScreen(
 
     var newServerUrl by remember { mutableStateOf("") }
 
-    // Update the newServerUrl when serverUrl changes
     LaunchedEffect(serverUrl) {
         newServerUrl = serverUrl
     }
 
-    // Set up permission change listener for real-time updates
     LaunchedEffect(Unit) {
         permissionManager.onPermissionChanged = { newSummary ->
             viewModel.updatePermissionSummary()
         }
     }
 
-    // Update permissions when screen resumes and when user returns from system settings
     DisposableEffect(Unit) {
         viewModel.updatePermissionSummary()
 
         val lifecycleObserver = object : androidx.lifecycle.DefaultLifecycleObserver {
             override fun onResume(owner: androidx.lifecycle.LifecycleOwner) {
                 super.onResume(owner)
-                // Update permissions when user returns from system settings
                 viewModel.updatePermissionSummary()
                 permissionManager.checkAndNotifyPermissionChanges()
             }
@@ -71,12 +67,10 @@ fun SettingsScreen(
         }
     }
 
-    // Also listen for window focus changes (when user returns from settings)
     val activity = context as? ComponentActivity
     LaunchedEffect(activity) {
         activity?.let {
-            // This will trigger when the user returns to the app from system settings
-            kotlinx.coroutines.delay(500) // Small delay to ensure we're fully resumed
+            kotlinx.coroutines.delay(500)
             viewModel.updatePermissionSummary()
         }
     }
@@ -109,7 +103,6 @@ fun SettingsScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Server URL Configuration
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
@@ -152,7 +145,6 @@ fun SettingsScreen(
                 }
             }
 
-            // Permissions Section
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
@@ -173,7 +165,6 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
-                    // Notification Permission
                     PermissionItem(
                         icon = Icons.Default.Notifications,
                         title = "Notification Permission",
@@ -184,7 +175,6 @@ fun SettingsScreen(
                         }
                     )
 
-                    // Battery Optimization
                     PermissionItem(
                         icon = Icons.Default.Warning,
                         title = "Battery Optimization",
@@ -195,7 +185,6 @@ fun SettingsScreen(
                         }
                     )
 
-                    // Overall status
                     if (permissionSummary.allPermissionsGranted) {
                         Card(
                             modifier = Modifier.fillMaxWidth(),

@@ -1,7 +1,6 @@
 package org.opennotification.opennotification_client.network
 
 import android.content.Context
-import android.content.SharedPreferences
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
@@ -20,24 +19,17 @@ import okhttp3.WebSocketListener
 import okio.ByteString
 import org.opennotification.opennotification_client.data.models.ConnectionStatus
 import org.opennotification.opennotification_client.data.models.Notification
-import java.security.cert.X509Certificate
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
-import javax.net.ssl.HostnameVerifier
 
 class WebSocketManager private constructor() {
     companion object {
         private const val TAG = "WebSocketManager"
-        private var BASE_WS_URL = "wss://api.opennotification.org/ws" // Updated default URL
+        private var BASE_WS_URL = "wss://api.opennotification.org/ws"
         private const val RECONNECT_DELAY = 5000L
-
-        // SharedPreferences constants
         private const val PREFS_NAME = "opennotification_settings"
         private const val KEY_SERVER_URL = "server_url"
-        private const val DEFAULT_SERVER_URL = "https://api.opennotification.org" // Updated default URL
+        private const val DEFAULT_SERVER_URL = "https://api.opennotification.org"
 
         @Volatile
         private var INSTANCE: WebSocketManager? = null
@@ -50,96 +42,52 @@ class WebSocketManager private constructor() {
             }
         }
 
-        // Method to initialize with context to load saved settings
         fun initializeWithContext(context: Context) {
             getInstance().loadServerUrlFromPreferences(context)
         }
     }
 
-    private val gson = GsonBuilder()
-        .setLenient()
-        .create()
+    private val gson = GsonBuilder().setLenient().create()
 
-    // Create a trust manager that accepts all certificates for development
-    private val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
-        override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-        override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-        override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-    })
-
-    // Create SSL context that uses our trust manager
-    private val sslContext = SSLContext.getInstance("SSL").apply {
-        init(null, trustAllCerts, java.security.SecureRandom())
-    }
-
-    // Create hostname verifier that accepts all hostnames for development
-    private val hostnameVerifier = HostnameVerifier { _, _ -> true }
-
-    // Create a more resilient OkHttpClient with aggressive timeouts and retry logic
     private val okHttpClient = OkHttpClient.Builder()
-        .pingInterval(20, TimeUnit.SECONDS) // More frequent pings to detect disconnections faster
-        .connectTimeout(10, TimeUnit.SECONDS) // Shorter connect timeout for faster failure detection
-        .readTimeout(30, TimeUnit.SECONDS) // Reasonable read timeout
-        .writeTimeout(10, TimeUnit.SECONDS) // Short write timeout for faster failure detection
-        .retryOnConnectionFailure(true) // Enable automatic retry on connection failures
-        .sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
-        .hostnameVerifier(hostnameVerifier)
+        .pingInterval(20, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
-    // Map of GUID to WebSocket connection and status
     private val connections = ConcurrentHashMap<String, WebSocketConnection>()
-
-    // Set to track GUIDs currently being connected to prevent duplicates
     private val connectingGuids = ConcurrentHashMap.newKeySet<String>()
-
-    // StateFlow for connection status updates
     private val _connectionStatuses = MutableStateFlow<Map<String, ConnectionStatus>>(emptyMap())
     val connectionStatuses: StateFlow<Map<String, ConnectionStatus>> = _connectionStatuses
-
-    // Callback for receiving notifications
     var onNotificationReceived: ((Notification) -> Unit)? = null
-
-    // Keep track of active listeners for automatic error retry
     private val activeListenerGuids = ConcurrentHashMap.newKeySet<String>()
 
     data class WebSocketConnection(
         val webSocket: WebSocket?,
         val status: ConnectionStatus,
         val reconnectJob: Job?,
-        val lastReconnectAttempt: Long = 0L // Track last reconnect attempt to prevent spam
+        val lastReconnectAttempt: Long = 0L
     )
-
-    // Battery-efficient approach: No continuous background monitoring
-    // Keep-alive and error retry is handled by alarm-based system
 
     fun connectToGuid(guid: String) {
         Log.d(TAG, "Connecting to GUID: $guid")
 
-        // Check if already connected or currently connecting
         val currentConnection = connections[guid]
-
-        // Add detailed logging to debug the issue
         Log.d(TAG, "Current connection for GUID $guid: status=${currentConnection?.status}, webSocket=${currentConnection?.webSocket != null}")
 
-        // ENHANCED FIX: More robust connection state verification
         val isActuallyConnected = currentConnection?.webSocket?.let { ws ->
             try {
-                // For WebSockets, we need to check if the connection is actually alive
-                // We'll use a more reliable method to test the connection
                 val wasConnected = currentConnection.status == ConnectionStatus.CONNECTED
-
-                // If the status shows connected, try to send a test message
                 if (wasConnected) {
-                    // Send an empty ping to test if connection is alive
                     val testResult = ws.send("")
                     if (!testResult) {
                         Log.w(TAG, "WebSocket send test failed for GUID: $guid - connection is dead")
                         return@let false
                     }
                 }
-
                 wasConnected
             } catch (e: Exception) {
                 Log.w(TAG, "WebSocket test failed for GUID: $guid, connection appears dead", e)
@@ -149,19 +97,16 @@ class WebSocketManager private constructor() {
 
         Log.d(TAG, "Actual connection state for GUID $guid: stored_status=${currentConnection?.status}, actually_connected=$isActuallyConnected")
 
-        // CRITICAL: Force reconnection if we were just marked as ERROR, regardless of what the test says
         val wasJustMarkedAsError = currentConnection?.status == ConnectionStatus.ERROR
         if (wasJustMarkedAsError) {
-            Log.w(TAG, "Connection was marked as ERROR for GUID: $guid - forcing fresh reconnection regardless of test results")
+            Log.w(TAG, "Connection was marked as ERROR for GUID: $guid - forcing fresh reconnection")
         }
 
-        // Only skip if we're actually CONNECTED AND the connection is working AND it wasn't just marked as error
         if (isActuallyConnected && currentConnection?.status == ConnectionStatus.CONNECTED && !wasJustMarkedAsError) {
             Log.d(TAG, "Already connected to GUID: $guid (verified working connection)")
             return
         }
 
-        // If we have a connection that's supposed to be connected but isn't working, or was marked as error, force cleanup
         if ((currentConnection?.status == ConnectionStatus.CONNECTED && !isActuallyConnected) || wasJustMarkedAsError) {
             Log.w(TAG, "Connection marked as ${currentConnection?.status} but forcing cleanup for GUID: $guid")
             try {
@@ -169,23 +114,18 @@ class WebSocketManager private constructor() {
             } catch (e: Exception) {
                 Log.w(TAG, "Error closing WebSocket during cleanup for GUID: $guid", e)
             }
-
-            // IMPORTANT: Clear the connection state immediately to force fresh connection
             connections.remove(guid)
             connectingGuids.remove(guid)
         }
 
-        // If connection is in ERROR state, we should attempt to reconnect
         if (currentConnection?.status == ConnectionStatus.ERROR) {
             Log.i(TAG, "Connection in ERROR state for GUID: $guid - forcing reconnection")
         }
 
-        // If connection is DISCONNECTED, we should reconnect
         if (currentConnection?.status == ConnectionStatus.DISCONNECTED) {
             Log.i(TAG, "Connection in DISCONNECTED state for GUID: $guid - proceeding with reconnection")
         }
 
-        // For ERROR state connections, reduce the rapid reconnection prevention to allow faster recovery
         val preventionThreshold = if (wasJustMarkedAsError) 500L else 1000L
         val timeSinceLastAttempt = System.currentTimeMillis() - (currentConnection?.lastReconnectAttempt ?: 0L)
 
@@ -194,7 +134,6 @@ class WebSocketManager private constructor() {
             return
         }
 
-        // If connecting but it's been too long, allow reconnection attempt
         if (currentConnection?.status == ConnectionStatus.CONNECTING && timeSinceLastAttempt > 30000L) {
             Log.w(TAG, "Connection stuck in CONNECTING state for ${timeSinceLastAttempt}ms - forcing fresh attempt")
         } else if (currentConnection?.status == ConnectionStatus.CONNECTING && timeSinceLastAttempt < 30000L) {
@@ -202,16 +141,13 @@ class WebSocketManager private constructor() {
             return
         }
 
-        // Clean up any existing state
         if (connectingGuids.contains(guid)) {
             Log.w(TAG, "Removing stale connecting state for GUID: $guid")
             connectingGuids.remove(guid)
         }
 
-        // Cancel any existing reconnect job before starting new connection
         connections[guid]?.reconnectJob?.cancel()
 
-        // Close any existing WebSocket connection that might be in a bad state
         connections[guid]?.webSocket?.let { ws ->
             Log.i(TAG, "Closing existing WebSocket for fresh connection attempt for GUID: $guid")
             try {
@@ -223,11 +159,8 @@ class WebSocketManager private constructor() {
 
         Log.i(TAG, "Proceeding with fresh connection attempt for GUID: $guid (previous status: ${currentConnection?.status})")
 
-        // Add to connecting set to prevent duplicates
         connectingGuids.add(guid)
         updateConnectionStatus(guid, ConnectionStatus.CONNECTING)
-
-        // Try primary URL first
         attemptConnection(guid, BASE_WS_URL, true)
     }
 
@@ -240,7 +173,7 @@ class WebSocketManager private constructor() {
         val webSocketListener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.d(TAG, "WebSocket opened for GUID: $guid using URL: $wsUrl")
-                connectingGuids.remove(guid) // Remove from connecting set
+                connectingGuids.remove(guid)
                 connections[guid] = WebSocketConnection(
                     webSocket = webSocket,
                     status = ConnectionStatus.CONNECTED,
@@ -251,7 +184,6 @@ class WebSocketManager private constructor() {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                // Check if this GUID is still in our active connections before processing
                 if (!connections.containsKey(guid)) {
                     Log.w(TAG, "Received message for disconnected GUID: $guid, ignoring message")
                     return
@@ -276,26 +208,24 @@ class WebSocketManager private constructor() {
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                Log.w(TAG, "WebSocket closed for GUID: $guid (possibly due to heavy app interference)")
-                connectingGuids.remove(guid) // Remove from connecting set
+                Log.w(TAG, "WebSocket closed for GUID: $guid")
+                connectingGuids.remove(guid)
                 updateConnectionStatus(guid, ConnectionStatus.DISCONNECTED)
                 scheduleReconnect(guid, "Connection closed")
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e(TAG, "WebSocket failure for GUID: $guid using URL: $wsUrl", t)
-                connectingGuids.remove(guid) // Remove from connecting set
+                connectingGuids.remove(guid)
 
-                // Check if this is a "Software caused connection abort" - common when heavy apps interfere
-                val isHeavyAppInterference = t.message?.contains("Software caused connection abort") == true ||
+                val isConnectionIssue = t.message?.contains("Software caused connection abort") == true ||
                         t.message?.contains("Connection reset") == true ||
                         t.message?.contains("Connection refused") == true
 
-                if (isHeavyAppInterference) {
-                    Log.w(TAG, "Detected heavy app interference for GUID: $guid - scheduling immediate reconnect")
+                if (isConnectionIssue) {
+                    Log.w(TAG, "Detected connection issue for GUID: $guid - scheduling immediate reconnect")
                 }
 
-                // Try fallback URL if this was the primary attempt and URL ends with /
                 if (isPrimaryAttempt && wsUrl.endsWith("/")) {
                     val fallbackUrl = wsUrl.removeSuffix("/")
                     Log.i(TAG, "Primary connection failed, trying fallback URL: $fallbackUrl")
@@ -303,11 +233,8 @@ class WebSocketManager private constructor() {
                     return
                 }
 
-                // If fallback also fails or no fallback needed, mark as error and schedule reconnect
                 updateConnectionStatus(guid, ConnectionStatus.ERROR)
-
-                // For heavy app interference, use shorter reconnect delay
-                val reconnectDelay = if (isHeavyAppInterference) 2000L else RECONNECT_DELAY
+                val reconnectDelay = if (isConnectionIssue) 2000L else RECONNECT_DELAY
                 scheduleReconnect(guid, "Connection failed: ${t.message}", reconnectDelay)
             }
         }
@@ -324,19 +251,14 @@ class WebSocketManager private constructor() {
     fun disconnectFromGuid(guid: String) {
         Log.i(TAG, "Disconnecting WebSocket for GUID: $guid")
         connections[guid]?.let { connection ->
-            // Cancel any pending reconnection attempts
             connection.reconnectJob?.cancel()
-            // Close the WebSocket connection
             connection.webSocket?.close(1000, "Listener stopped")
             Log.i(TAG, "WebSocket connection closed for GUID: $guid")
         }
 
-        // Remove from connections map
         connections.remove(guid)
-        // Remove from connecting set if it was in there
         connectingGuids.remove(guid)
 
-        // Immediately update connection status to disconnected and remove from tracking
         val currentStatuses = _connectionStatuses.value.toMutableMap()
         currentStatuses.remove(guid)
         _connectionStatuses.value = currentStatuses
@@ -352,8 +274,6 @@ class WebSocketManager private constructor() {
     }
 
     private fun scheduleReconnect(guid: String, reason: String = "Unknown", delay: Long = RECONNECT_DELAY) {
-        // Only schedule reconnect if the GUID is still in the connections map
-        // This prevents reconnecting to inactive listeners
         if (!connections.containsKey(guid)) {
             Log.d(TAG, "Not scheduling reconnect for GUID: $guid - listener was disconnected")
             return
@@ -363,8 +283,6 @@ class WebSocketManager private constructor() {
 
         val reconnectJob = scope.launch {
             kotlinx.coroutines.delay(delay)
-            // Double-check that the GUID is still in connections before reconnecting
-            // This handles the case where a listener was deactivated during the delay
             if (connections.containsKey(guid)) {
                 Log.d(TAG, "Attempting to reconnect to GUID: $guid after $reason")
                 connectToGuid(guid)
@@ -390,7 +308,6 @@ class WebSocketManager private constructor() {
         currentStatuses[guid] = status
         _connectionStatuses.value = currentStatuses
 
-        // Log current connection summary
         val totalConnections = connections.size
         val activeConnections = connections.values.count { it.status == ConnectionStatus.CONNECTED }
         Log.i(TAG, "Connection summary: $activeConnections/$totalConnections active connections")
@@ -412,32 +329,23 @@ class WebSocketManager private constructor() {
         return connections.mapValues { it.value.status }
     }
 
-    /**
-     * Update the WebSocket server URL and reconnect active connections
-     */
     fun updateServerUrl(newBaseUrl: String) {
         Log.i(TAG, "Updating server URL from $BASE_WS_URL to $newBaseUrl")
 
-        // Store the currently active GUIDs before disconnecting
         val activeGuids = connections.keys.toList()
         Log.i(TAG, "Preserving ${activeGuids.size} active connections for URL change")
 
-        // Disconnect all current connections but don't remove them from tracking
         activeGuids.forEach { guid ->
             connections[guid]?.let { connection ->
-                // Cancel any pending reconnection attempts
                 connection.reconnectJob?.cancel()
-                // Close the WebSocket connection
                 connection.webSocket?.close(1000, "Server URL changed")
                 Log.i(TAG, "Disconnected GUID: $guid for URL change")
             }
 
-            // Keep connection in tracking but mark as disconnected
             connections[guid] = WebSocketConnection(null, ConnectionStatus.DISCONNECTED, null)
             updateConnectionStatus(guid, ConnectionStatus.DISCONNECTED)
         }
 
-        // Update the base URL
         BASE_WS_URL = if (newBaseUrl.endsWith("/ws")) {
             newBaseUrl
         } else {
@@ -446,10 +354,9 @@ class WebSocketManager private constructor() {
 
         Log.i(TAG, "Server URL updated to: $BASE_WS_URL")
 
-        // Immediately reconnect all previously active listeners with new URL
         if (activeGuids.isNotEmpty()) {
             scope.launch {
-                kotlinx.coroutines.delay(500) // Brief delay for clean disconnection
+                kotlinx.coroutines.delay(500)
                 Log.i(TAG, "Reconnecting ${activeGuids.size} listeners with new URL")
 
                 activeGuids.forEach { guid ->
@@ -466,13 +373,9 @@ class WebSocketManager private constructor() {
 
     fun updateActiveListeners(listeners: List<org.opennotification.opennotification_client.data.models.WebSocketListener>) {
         scope.launch {
-            // Get currently connected GUIDs
             val currentGuids = connections.keys.toSet()
-
-            // Get GUIDs that should be active
             val activeGuids = listeners.filter { it.isActive }.map { it.guid }.toSet()
 
-            // Update the active listeners tracking for error retry monitor
             activeListenerGuids.clear()
             activeListenerGuids.addAll(activeGuids)
 
@@ -480,7 +383,6 @@ class WebSocketManager private constructor() {
             Log.i(TAG, "  Current connections: ${currentGuids.joinToString()}")
             Log.i(TAG, "  Should be active: ${activeGuids.joinToString()}")
 
-            // Disconnect listeners that are no longer active or were stopped
             val toDisconnect = currentGuids.minus(activeGuids)
             if (toDisconnect.isNotEmpty()) {
                 Log.i(TAG, "Disconnecting inactive listeners: ${toDisconnect.joinToString()}")
@@ -490,7 +392,6 @@ class WebSocketManager private constructor() {
                 }
             }
 
-            // Connect new active listeners
             val toConnect = activeGuids.minus(currentGuids)
             if (toConnect.isNotEmpty()) {
                 Log.i(TAG, "Connecting new active listeners: ${toConnect.joinToString()}")
@@ -500,8 +401,6 @@ class WebSocketManager private constructor() {
                 }
             }
 
-            // CRITICAL FIX: Also ensure ALL active listeners are connected, even if they appear to already be connected
-            // This handles the case where the service restarted and lost WebSocket connections
             activeGuids.forEach { guid ->
                 val currentConnection = connections[guid]
                 if (currentConnection == null || currentConnection.status != ConnectionStatus.CONNECTED) {
@@ -522,9 +421,6 @@ class WebSocketManager private constructor() {
         return connections.isNotEmpty()
     }
 
-    /**
-     * Send keep-alive pings to all connected WebSockets (called by alarm)
-     */
     fun sendKeepAlivePings() {
         Log.d(TAG, "Sending keep-alive pings to ${connections.size} connections")
 
@@ -546,9 +442,6 @@ class WebSocketManager private constructor() {
         }
     }
 
-    /**
-     * Retry connections that are in ERROR state and should be active (called by alarm)
-     */
     fun retryErrorConnections() {
         val errorConnections = connections.filterValues { it.status == ConnectionStatus.ERROR }
 
@@ -556,58 +449,37 @@ class WebSocketManager private constructor() {
             Log.i(TAG, "Retrying ${errorConnections.size} error connections")
 
             errorConnections.forEach { (guid, connection) ->
-                // Only retry if this GUID should still be active
                 if (activeListenerGuids.contains(guid)) {
                     Log.i(TAG, "Forcing fresh connection attempt for error GUID: $guid")
 
-                    // Cancel any existing reconnect job
                     connection.reconnectJob?.cancel()
-
-                    // Remove from connecting set to allow fresh attempt
                     connectingGuids.remove(guid)
-
-                    // Close any existing WebSocket connection
                     connection.webSocket?.close(1000, "Error retry")
-
-                    // Force a fresh connection attempt
                     connectToGuid(guid)
                 }
             }
         }
     }
 
-    /**
-     * Get connections that are in ERROR state
-     */
     fun getErrorConnections(): List<String> {
         return connections.filterValues { it.status == ConnectionStatus.ERROR }.keys.toList()
     }
 
-    /**
-     * Force reconnect all active connections - disconnects and reconnects all current connections
-     */
     fun forceReconnectAll() {
         Log.i(TAG, "Force reconnecting all active connections")
 
-        // Get all current connection GUIDs
         val activeGuids = connections.keys.toList()
 
-        // Disconnect all connections first
         activeGuids.forEach { guid ->
             connections[guid]?.let { connection ->
-                // Cancel any pending reconnection attempts
                 connection.reconnectJob?.cancel()
-                // Close the WebSocket connection
                 connection.webSocket?.close(1000, "Force reconnect")
                 Log.i(TAG, "WebSocket connection closed for GUID: $guid")
             }
 
-            // Remove from connections map
             connections.remove(guid)
-            // Remove from connecting set if it was in there
             connectingGuids.remove(guid)
 
-            // Update status to disconnected
             val currentStatuses = _connectionStatuses.value.toMutableMap()
             currentStatuses.remove(guid)
             _connectionStatuses.value = currentStatuses
@@ -615,13 +487,11 @@ class WebSocketManager private constructor() {
             Log.i(TAG, "WebSocket connection and status tracking removed for GUID: $guid")
         }
 
-        // Give a moment for disconnections to complete, then reconnect
         scope.launch {
-            kotlinx.coroutines.delay(500) // Wait 500ms for clean disconnection
+            kotlinx.coroutines.delay(500)
 
             Log.i(TAG, "Starting forced reconnection for ${activeGuids.size} listeners")
 
-            // Reconnect to all previously active GUIDs
             activeGuids.forEach { guid ->
                 connectToGuid(guid)
             }
@@ -630,15 +500,11 @@ class WebSocketManager private constructor() {
         }
     }
 
-    /**
-     * Load server URL from SharedPreferences
-     */
     private fun loadServerUrlFromPreferences(context: Context) {
         try {
             val sharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             val savedUrl = sharedPreferences.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL) ?: DEFAULT_SERVER_URL
 
-            // Update the base URL if it's different from default
             if (savedUrl != DEFAULT_SERVER_URL) {
                 BASE_WS_URL = if (savedUrl.endsWith("/ws")) {
                     savedUrl

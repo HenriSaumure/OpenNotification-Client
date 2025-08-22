@@ -48,7 +48,6 @@ fun PermissionDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                // Notification Permission
                 PermissionItem(
                     icon = Icons.Default.Notifications,
                     title = "Notification Permission",
@@ -57,7 +56,6 @@ fun PermissionDialog(
                     onRequest = onNotificationPermissionRequest
                 )
 
-                // Battery Optimization
                 PermissionItem(
                     icon = Icons.Default.Warning,
                     title = "Unrestricted Battery Usage",
@@ -93,7 +91,7 @@ private fun PermissionItem(
     description: String,
     isGranted: Boolean,
     onRequest: () -> Unit,
-    isCritical: Boolean = false // New parameter to indicate critical permissions
+    isCritical: Boolean = false
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),

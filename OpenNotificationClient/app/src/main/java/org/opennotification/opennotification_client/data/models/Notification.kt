@@ -12,16 +12,19 @@ data class Notification(
     @SerializedName("Title") val title: String = "",
     @SerializedName("Description") val description: String? = null,
     @SerializedName("PictureLink") val pictureLink: String? = null,
+    @SerializedName("Icon") val icon: String? = null,
+    @SerializedName("ActionLink") val actionLink: String? = null,
     @SerializedName("IsAlert") val isAlert: Boolean = false,
     val timestamp: Long = System.currentTimeMillis()
 ) {
-    // Secondary constructor for JSON deserialization
     constructor() : this(
         id = UUID.randomUUID().toString(),
         guid = "",
         title = "",
         description = null,
         pictureLink = null,
+        icon = null,
+        actionLink = null,
         isAlert = false,
         timestamp = System.currentTimeMillis()
     )
@@ -32,5 +35,7 @@ data class NotificationRequest(
     val title: String,
     val description: String? = null,
     val pictureLink: String? = null,
+    val icon: String? = null,
+    val actionLink: String? = null,
     val isAlert: Boolean = false
 )

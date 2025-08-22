@@ -15,7 +15,6 @@ class ServiceRestartReceiver : BroadcastReceiver() {
         Log.d(TAG, "Service restart receiver triggered")
 
         try {
-            // Restart the WebSocket service
             WebSocketService.startService(context)
             Log.i(TAG, "WebSocket service restarted successfully")
         } catch (e: Exception) {

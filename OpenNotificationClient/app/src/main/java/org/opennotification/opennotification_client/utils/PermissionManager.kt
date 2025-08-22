@@ -2,6 +2,7 @@ package org.opennotification.opennotification_client.utils
 
 import android.Manifest
 import android.app.Activity
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -19,14 +20,11 @@ class PermissionManager(private val context: Context) {
         private const val TAG = "PermissionManager"
         const val NOTIFICATION_PERMISSION_REQUEST_CODE = 1001
         const val BATTERY_OPTIMIZATION_REQUEST_CODE = 1002
+        const val FULL_SCREEN_INTENT_REQUEST_CODE = 1003
     }
 
-    // Callback for permission changes
     var onPermissionChanged: ((PermissionSummary) -> Unit)? = null
 
-    /**
-     * Check if notification permission is granted
-     */
     fun isNotificationPermissionGranted(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ContextCompat.checkSelfPermission(
@@ -34,14 +32,19 @@ class PermissionManager(private val context: Context) {
                 Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
         } else {
-            // For Android 12 and below, check if notifications are enabled
             NotificationManagerCompat.from(context).areNotificationsEnabled()
         }
     }
 
-    /**
-     * Request notification permission
-     */
+    fun isFullScreenIntentPermissionGranted(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { // Android 14+
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.canUseFullScreenIntent()
+        } else {
+            true // Not required for older versions
+        }
+    }
+
     fun requestNotificationPermission(activity: Activity) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ActivityCompat.requestPermissions(
@@ -50,14 +53,26 @@ class PermissionManager(private val context: Context) {
                 NOTIFICATION_PERMISSION_REQUEST_CODE
             )
         } else {
-            // For older versions, direct to notification settings
             openNotificationSettings(activity)
         }
     }
 
-    /**
-     * Check if app is whitelisted from battery optimization
-     */
+    fun requestFullScreenIntentPermission(activity: Activity) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            try {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                }
+                activity.startActivityForResult(intent, FULL_SCREEN_INTENT_REQUEST_CODE)
+                Log.i(TAG, "Opened full-screen intent permission settings")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to open full-screen intent settings", e)
+                // Fallback to general app settings
+                openNotificationSettings(activity)
+            }
+        }
+    }
+
     fun isBatteryOptimizationIgnored(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -65,20 +80,16 @@ class PermissionManager(private val context: Context) {
             Log.d(TAG, "Battery optimization ignored: $isIgnored for package: ${context.packageName}")
             isIgnored
         } else {
-            true // Not applicable for older versions
+            true
         }
     }
 
-    /**
-     * Request to ignore battery optimization with more aggressive approach
-     */
     fun requestIgnoreBatteryOptimization(activity: Activity) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
             if (!powerManager.isIgnoringBatteryOptimizations(context.packageName)) {
                 Log.i(TAG, "Requesting unrestricted battery usage for background service")
 
-                // First try the direct request
                 val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                     data = Uri.parse("package:${context.packageName}")
                 }
@@ -96,9 +107,6 @@ class PermissionManager(private val context: Context) {
         }
     }
 
-    /**
-     * Open notification settings manually
-     */
     fun openNotificationSettings(activity: Activity) {
         try {
             val intent = Intent().apply {
@@ -116,14 +124,10 @@ class PermissionManager(private val context: Context) {
         }
     }
 
-    /**
-     * Open battery optimization settings manually with enhanced guidance
-     */
     fun openBatteryOptimizationSettings(activity: Activity) {
         try {
             Log.i(TAG, "Opening battery optimization settings manually")
             val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                // Try to open the specific app battery settings first
                 Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
             } else {
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
@@ -133,7 +137,6 @@ class PermissionManager(private val context: Context) {
             activity.startActivity(intent)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to open battery optimization settings", e)
-            // Last resort - open general settings
             try {
                 val fallbackIntent = Intent(Settings.ACTION_SETTINGS)
                 activity.startActivity(fallbackIntent)
@@ -143,9 +146,6 @@ class PermissionManager(private val context: Context) {
         }
     }
 
-    /**
-     * Request background app refresh permissions for newer Android versions
-     */
     fun requestBackgroundAppPermissions(activity: Activity) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -161,30 +161,23 @@ class PermissionManager(private val context: Context) {
         }
     }
 
-    /**
-     * Check if the app has all necessary background permissions
-     */
     fun hasAllBackgroundPermissions(): Boolean {
         val batteryOptimized = isBatteryOptimizationIgnored()
         val notificationEnabled = isNotificationPermissionGranted()
+        val fullScreenIntentEnabled = isFullScreenIntentPermissionGranted()
 
-        Log.d(TAG, "Permission check - Battery optimized: $batteryOptimized, Notifications: $notificationEnabled")
-        return batteryOptimized && notificationEnabled
+        Log.d(TAG, "Permission check - Battery optimized: $batteryOptimized, Notifications: $notificationEnabled, Full-screen intent: $fullScreenIntentEnabled")
+        return batteryOptimized && notificationEnabled && fullScreenIntentEnabled
     }
 
-    /**
-     * Get a summary of all permission states
-     */
     fun getPermissionSummary(): PermissionSummary {
         return PermissionSummary(
             notificationPermissionGranted = isNotificationPermissionGranted(),
-            batteryOptimizationIgnored = isBatteryOptimizationIgnored()
+            batteryOptimizationIgnored = isBatteryOptimizationIgnored(),
+            fullScreenIntentPermissionGranted = isFullScreenIntentPermissionGranted()
         )
     }
 
-    /**
-     * Check and notify if permissions have changed
-     */
     fun checkAndNotifyPermissionChanges() {
         val currentSummary = getPermissionSummary()
         onPermissionChanged?.invoke(currentSummary)
@@ -192,9 +185,10 @@ class PermissionManager(private val context: Context) {
 
     data class PermissionSummary(
         val notificationPermissionGranted: Boolean,
-        val batteryOptimizationIgnored: Boolean
+        val batteryOptimizationIgnored: Boolean,
+        val fullScreenIntentPermissionGranted: Boolean = true
     ) {
         val allPermissionsGranted: Boolean
-            get() = notificationPermissionGranted && batteryOptimizationIgnored
+            get() = notificationPermissionGranted && batteryOptimizationIgnored && fullScreenIntentPermissionGranted
     }
 }

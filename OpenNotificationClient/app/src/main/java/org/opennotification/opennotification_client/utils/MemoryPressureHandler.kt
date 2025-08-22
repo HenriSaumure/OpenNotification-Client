@@ -7,7 +7,6 @@ import android.content.BroadcastReceiver
 import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.os.Build
 import android.os.Process
 import android.util.Log
@@ -18,16 +17,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.opennotification.opennotification_client.service.WatchdogService
 
-/**
- * Handles memory pressure and prevents app termination using multiple strategies
- */
 class MemoryPressureHandler(private val context: Context) : ComponentCallbacks2 {
     companion object {
         private const val TAG = "MemoryPressureHandler"
         private const val ACTION_RESURRECTION = "org.opennotification.opennotification_client.RESURRECTION"
-        private const val RESURRECTION_DELAY = 10000L // 10 seconds
-
-        // High priority OOM adjustment values
+        private const val RESURRECTION_DELAY = 10000L
         private const val FOREGROUND_APP_ADJ = 0
         private const val VISIBLE_APP_ADJ = 100
         private const val PERCEPTIBLE_APP_ADJ = 200
@@ -36,9 +30,6 @@ class MemoryPressureHandler(private val context: Context) : ComponentCallbacks2 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var isRegistered = false
 
-    /**
-     * Start comprehensive memory pressure protection
-     */
     fun startProtection() {
         if (!isRegistered) {
             context.registerComponentCallbacks(this)
@@ -50,9 +41,6 @@ class MemoryPressureHandler(private val context: Context) : ComponentCallbacks2 
         }
     }
 
-    /**
-     * Stop memory pressure protection
-     */
     fun stopProtection() {
         if (isRegistered) {
             try {
@@ -262,7 +250,7 @@ class MemoryPressureHandler(private val context: Context) : ComponentCallbacks2 
 
     private fun registerResurrectionReceiver() {
         resurrectionReceiver = ResurrectionReceiver()
-        val filter = IntentFilter(ACTION_RESURRECTION)
+        val filter = android.content.IntentFilter(ACTION_RESURRECTION)
         context.registerReceiver(resurrectionReceiver, filter)
         Log.i(TAG, "Resurrection receiver registered")
     }
@@ -276,9 +264,6 @@ class MemoryPressureHandler(private val context: Context) : ComponentCallbacks2 
         }
     }
 
-    /**
-     * Receiver that resurrects the app if it gets killed
-     */
     inner class ResurrectionReceiver : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == ACTION_RESURRECTION) {

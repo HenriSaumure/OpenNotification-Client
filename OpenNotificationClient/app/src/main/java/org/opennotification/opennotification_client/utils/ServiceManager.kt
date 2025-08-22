@@ -52,7 +52,6 @@ class ServiceManager(private val context: Context) {
 
     fun restartService() {
         stopService()
-        // Small delay before restart
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             startService()
         }, 1000)

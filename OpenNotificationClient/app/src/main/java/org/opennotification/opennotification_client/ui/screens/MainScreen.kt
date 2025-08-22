@@ -35,7 +35,6 @@ fun MainScreen(
             TopAppBar(
                 title = { Text("OpenNotification Listeners") },
                 actions = {
-                    // Only keep settings button - refresh is now pull-to-refresh
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(
                             imageVector = Icons.Default.Settings,
@@ -64,7 +63,6 @@ fun MainScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Error message
             errorMessage?.let { message ->
                 Card(
                     modifier = Modifier
@@ -95,7 +93,6 @@ fun MainScreen(
                 }
             }
 
-            // Pull-to-refresh content
             PullToRefreshBox(
                 isRefreshing = isLoading,
                 onRefresh = { viewModel.refreshConnections() },
@@ -151,7 +148,6 @@ fun MainScreen(
             }
         }
 
-        // Add listener dialog
         if (showAddDialog) {
             AddListenerDialog(
                 onDismiss = { showAddDialog = false },

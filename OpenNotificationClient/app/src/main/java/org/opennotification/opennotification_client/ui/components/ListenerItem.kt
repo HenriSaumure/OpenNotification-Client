@@ -43,10 +43,8 @@ fun ListenerItem(
     val clipboardManager = LocalClipboardManager.current
     val hapticFeedback = LocalHapticFeedback.current
 
-    // Force recomposition when connection status changes
     val currentConnectionStatus by remember(connectionStatus) { mutableStateOf(connectionStatus) }
 
-    // Get short GUID (last 5 characters)
     val shortGuid = listener.guid.takeLast(5)
     val displayGuid = if (showFullGuid) listener.guid else shortGuid
 
@@ -60,14 +58,12 @@ fun ListenerItem(
                     showContextMenu = true
                 },
                 onDoubleClick = {
-                    // Copy GUID to clipboard
                     clipboardManager.setText(AnnotatedString(listener.guid))
                 }
             ),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         if (showFullGuid) {
-            // Show only the full GUID when toggled
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -81,7 +77,6 @@ fun ListenerItem(
                 )
             }
         } else {
-            // Show normal layout with name, short GUID and connection status
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -89,7 +84,6 @@ fun ListenerItem(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Left side: Name and GUID
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "${listener.name ?: "Unnamed Listener"} • $displayGuid",
@@ -97,7 +91,6 @@ fun ListenerItem(
                         fontWeight = FontWeight.Bold
                     )
 
-                    // Show last connected time if available and not active
                     if (!listener.isActive && listener.lastConnected != null) {
                         Text(
                             text = "Last connected: ${formatTimestamp(listener.lastConnected)}",
@@ -107,7 +100,6 @@ fun ListenerItem(
                     }
                 }
 
-                // Right side: Connection status indicator and text
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -126,7 +118,6 @@ fun ListenerItem(
             }
         }
 
-        // Context menu dropdown
         DropdownMenu(
             expanded = showContextMenu,
             onDismissRequest = { showContextMenu = false }
@@ -180,7 +171,6 @@ fun ListenerItem(
         }
     }
 
-    // Delete confirmation dialog
     if (showDeleteDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
@@ -206,7 +196,6 @@ fun ListenerItem(
         )
     }
 
-    // Rename dialog
     if (showRenameDialog && onRename != null) {
         var newName by remember { mutableStateOf(listener.name ?: "") }
 
@@ -272,10 +261,10 @@ private fun getConnectionStatusColor(
         MaterialTheme.colorScheme.outline
     } else {
         when (connectionStatus) {
-            ConnectionStatus.CONNECTED -> Color(0xFF4CAF50) // Green
-            ConnectionStatus.CONNECTING -> Color(0xFFFF9800) // Orange
-            ConnectionStatus.ERROR -> Color(0xFFF44336) // Red
-            ConnectionStatus.DISCONNECTED, null -> Color(0xFF9E9E9E) // Gray
+            ConnectionStatus.CONNECTED -> Color(0xFF4CAF50)
+            ConnectionStatus.CONNECTING -> Color(0xFFFF9800)
+            ConnectionStatus.ERROR -> Color(0xFFF44336)
+            ConnectionStatus.DISCONNECTED, null -> Color(0xFF9E9E9E)
         }
     }
 }
