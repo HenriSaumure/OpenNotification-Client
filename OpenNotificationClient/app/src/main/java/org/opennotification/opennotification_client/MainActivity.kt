@@ -44,7 +44,11 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         permissionManager = PermissionManager(this)
 
-        if (!permissionManager.isBatteryOptimizationIgnored() && permissionManager.shouldShowPermissionDialog()) {
+        val initialPermissionSummary = permissionManager.getPermissionSummary()
+
+        if (!initialPermissionSummary.allPermissionsGranted &&
+            !permissionManager.isBatteryOptimizationIgnored() &&
+            permissionManager.shouldShowPermissionDialog()) {
             android.util.Log.w("MainActivity", "Battery optimization is NOT ignored - app will be killed when swiped away!")
             showPermissionDialog = true
         }

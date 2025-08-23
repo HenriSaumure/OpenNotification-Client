@@ -19,7 +19,7 @@ import kotlinx.coroutines.withContext
 import org.opennotification.opennotification_client.MainActivity
 import org.opennotification.opennotification_client.R
 import org.opennotification.opennotification_client.data.models.Notification
-import org.opennotification.opennotification_client.service.FullScreenOverlayService
+import org.opennotification.opennotification_client.ui.activities.FullScreenAlertActivity
 import java.net.URL
 
 class NotificationDisplayManager(private val context: Context) {
@@ -50,6 +50,7 @@ class NotificationDisplayManager(private val context: Context) {
                 enableLights(true)
                 enableVibration(true)
                 setShowBadge(true)
+                lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
             }
 
             val alertsChannel = NotificationChannel(
@@ -61,6 +62,7 @@ class NotificationDisplayManager(private val context: Context) {
                 enableLights(true)
                 enableVibration(true)
                 setShowBadge(true)
+                lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
             }
 
             val fullScreenAlertsChannel = NotificationChannel(
@@ -73,6 +75,7 @@ class NotificationDisplayManager(private val context: Context) {
                 enableVibration(true)
                 setShowBadge(true)
                 setBypassDnd(true)
+                lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
             }
 
             notificationManager.createNotificationChannel(messagesChannel)
@@ -84,10 +87,15 @@ class NotificationDisplayManager(private val context: Context) {
     fun showNotification(notification: Notification) {
         try {
             Log.d(TAG, "Showing notification: ${notification.title}, isAlert: ${notification.isAlert}")
+            Log.d(TAG, "Notification details - ID: ${notification.id}, GUID: ${notification.guid}, Description: ${notification.description}")
+            Log.d(TAG, "Notification media - PictureLink: ${notification.pictureLink}, Icon: ${notification.icon}, ActionLink: ${notification.actionLink}")
 
             if (notification.isAlert) {
+                Log.i(TAG, "Processing as FULL SCREEN ALERT - triggering showFullScreenAlert()")
                 showFullScreenAlert(notification)
                 return
+            } else {
+                Log.i(TAG, "Processing as REGULAR NOTIFICATION - isAlert flag is false")
             }
 
             val intent = Intent(context, MainActivity::class.java).apply {
@@ -118,6 +126,7 @@ class NotificationDisplayManager(private val context: Context) {
                 .setShowWhen(true)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
             if (!notification.actionLink.isNullOrBlank()) {
                 addActionButton(notificationBuilder, notification)
@@ -140,17 +149,11 @@ class NotificationDisplayManager(private val context: Context) {
 
     private fun showFullScreenAlert(notification: Notification) {
         try {
-            Log.d(TAG, "Showing full-screen overlay alert: ${notification.title}")
-
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M &&
-                !android.provider.Settings.canDrawOverlays(context)) {
-                Log.w(TAG, "Overlay permission not granted, falling back to regular notification")
-                showRegularNotificationAsFallback(notification)
-                return
-            }
+            Log.d(TAG, "Showing full-screen alert: ${notification.title}")
 
             try {
-                FullScreenOverlayService.showAlert(
+                Log.i(TAG, "Attempting to show full screen alert via activity")
+                FullScreenAlertActivity.showAlert(
                     context = context,
                     title = notification.title,
                     description = notification.description,
@@ -159,15 +162,94 @@ class NotificationDisplayManager(private val context: Context) {
                     actionLink = notification.actionLink,
                     guid = notification.guid
                 )
-                Log.i(TAG, "Full-screen overlay service started successfully")
+                Log.i(TAG, "Full-screen alert activity launched successfully - no backup notification needed")
+                return
+
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to show overlay, falling back to notification", e)
-                showRegularNotificationAsFallback(notification)
+                Log.w(TAG, "Full-screen alert activity failed - creating backup notification", e)
+                createHighPriorityNotificationWithFullScreenIntent(notification)
             }
 
         } catch (e: Exception) {
             Log.e(TAG, "Failed to show full-screen alert", e)
-            showRegularNotificationAsFallback(notification)
+            createHighPriorityNotificationWithFullScreenIntent(notification)
+        }
+    }
+
+    private fun createHighPriorityNotificationWithFullScreenIntent(notification: Notification) {
+        try {
+            Log.d(TAG, "Creating high-priority notification with full-screen intent")
+
+            val fullScreenIntent = Intent(context, FullScreenAlertActivity::class.java).apply {
+                putExtra(FullScreenAlertActivity.EXTRA_TITLE, notification.title)
+                putExtra(FullScreenAlertActivity.EXTRA_DESCRIPTION, notification.description)
+                putExtra(FullScreenAlertActivity.EXTRA_PICTURE_LINK, notification.pictureLink)
+                putExtra(FullScreenAlertActivity.EXTRA_ICON, notification.icon)
+                putExtra(FullScreenAlertActivity.EXTRA_ACTION_LINK, notification.actionLink)
+                putExtra(FullScreenAlertActivity.EXTRA_GUID, notification.guid)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+
+            val fullScreenPendingIntent = PendingIntent.getActivity(
+                context,
+                notification.hashCode() + 2000,
+                fullScreenIntent,
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                } else {
+                    PendingIntent.FLAG_UPDATE_CURRENT
+                }
+            )
+
+            val intent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("notification_id", notification.id)
+                putExtra("guid", notification.guid)
+                putExtra("is_alert", true)
+            }
+
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                notification.hashCode(),
+                intent,
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                } else {
+                    PendingIntent.FLAG_UPDATE_CURRENT
+                }
+            )
+
+            val notificationBuilder = NotificationCompat.Builder(context, FULL_SCREEN_ALERTS_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_notification)
+                .setContentTitle("🚨 ${notification.title}")
+                .setContentIntent(pendingIntent)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setAutoCancel(true)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setFullScreenIntent(fullScreenPendingIntent, true)
+                .setOngoing(false)
+
+            if (!notification.description.isNullOrBlank()) {
+                notificationBuilder.setContentText(notification.description)
+                notificationBuilder.setStyle(
+                    NotificationCompat.BigTextStyle()
+                        .bigText(notification.description)
+                )
+            }
+
+            if (!notification.actionLink.isNullOrBlank()) {
+                addActionButton(notificationBuilder, notification)
+            }
+
+            if (NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                notificationManager.notify(notification.hashCode() + 1000, notificationBuilder.build())
+                Log.i(TAG, "High-priority notification with full-screen intent created")
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to create high-priority notification with full-screen intent", e)
         }
     }
 
@@ -292,6 +374,7 @@ class NotificationDisplayManager(private val context: Context) {
                             if (notification.isAlert) NotificationCompat.CATEGORY_ALARM
                             else NotificationCompat.CATEGORY_MESSAGE
                         )
+                        .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
                     if (iconBitmap != null) {
                         updatedBuilder.setLargeIcon(iconBitmap)
@@ -411,5 +494,25 @@ class NotificationDisplayManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to cancel all notifications", e)
         }
+    }
+
+
+    fun testFullScreenAlert() {
+        Log.i(TAG, "TESTING: Triggering test full screen alert")
+
+        val testNotification = Notification(
+            id = "test-alert-${System.currentTimeMillis()}",
+            guid = "test-guid",
+            title = "TEST FULL SCREEN ALERT",
+            description = "This is a test full screen alert to verify the functionality",
+            pictureLink = null,
+            icon = null,
+            actionLink = null,
+            isAlert = true,
+            timestamp = System.currentTimeMillis()
+        )
+
+        Log.i(TAG, "TESTING: Created test notification with isAlert=true")
+        showNotification(testNotification)
     }
 }

@@ -184,15 +184,33 @@ class WebSocketManager private constructor() {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                if (!connections.containsKey(guid)) {
-                    Log.w(TAG, "Received message for disconnected GUID: $guid, ignoring message")
+                if (text.trim().equals("TEST_FULL_SCREEN", ignoreCase = true)) {
+                    Log.i(TAG, "TEST COMMAND RECEIVED - Triggering test full screen alert")
+                    val testNotification = Notification(
+                        id = "test-${System.currentTimeMillis()}",
+                        guid = guid,
+                        title = "TEST FULL SCREEN ALERT",
+                        description = "This is a test notification triggered by TEST_FULL_SCREEN command",
+                        isAlert = true,
+                        timestamp = System.currentTimeMillis()
+                    )
+                    onNotificationReceived?.invoke(testNotification)
                     return
                 }
 
                 Log.d(TAG, "Message received for GUID $guid: $text")
                 try {
                     val notification = gson.fromJson(text, Notification::class.java)
-                    onNotificationReceived?.invoke(notification)
+                    Log.d(TAG, "Parsed notification - Title: ${notification.title}, IsAlert: ${notification.isAlert}, Description: ${notification.description}")
+
+                    val correctedNotification = if (!notification.isAlert && text.contains("\"IsAlert\":\"true\"", ignoreCase = true)) {
+                        Log.w(TAG, "Detected string 'true' for IsAlert field, correcting to boolean true")
+                        notification.copy(isAlert = true)
+                    } else {
+                        notification
+                    }
+
+                    onNotificationReceived?.invoke(correctedNotification)
                 } catch (e: Exception) {
                     Log.e(TAG, "Error parsing notification: ${e.message}")
                 }

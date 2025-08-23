@@ -1,5 +1,7 @@
 package org.opennotification.opennotification_client.service
 
+import android.app.KeyguardManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -24,6 +26,7 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.view.WindowManager.LayoutParams
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.TextView
@@ -34,6 +37,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.opennotification.opennotification_client.R
+import org.opennotification.opennotification_client.ui.activities.FullScreenAlertActivity
 import java.net.URL
 
 class FullScreenOverlayService : Service() {
@@ -54,21 +58,47 @@ class FullScreenOverlayService : Service() {
             icon: String? = null,
             actionLink: String? = null,
             guid: String? = null
-        ) {
-            if (!canDrawOverlays(context)) {
-                Log.w(TAG, "Display over other apps permission not granted, cannot show overlay")
-                return
-            }
+        ): Boolean {
+            Log.d(TAG, "showAlert called - title: $title")
 
-            val intent = Intent(context, FullScreenOverlayService::class.java).apply {
-                putExtra(EXTRA_TITLE, title)
-                putExtra(EXTRA_DESCRIPTION, description)
-                putExtra(EXTRA_PICTURE_LINK, pictureLink)
-                putExtra(EXTRA_ICON, icon)
-                putExtra(EXTRA_ACTION_LINK, actionLink)
-                putExtra(EXTRA_GUID, guid)
+            val keyguardManager = context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+
+            try {
+                Log.i(TAG, "Attempting to show full screen alert via activity")
+                FullScreenAlertActivity.showAlert(
+                    context, title, description, pictureLink, icon, actionLink, guid
+                )
+                Log.i(TAG, "Full screen alert activity launched successfully")
+
+                if (!keyguardManager.isKeyguardLocked && canDrawOverlays(context)) {
+                    Log.d(TAG, "Device unlocked with overlay permission - but activity already shown, skipping overlay to prevent duplicates")
+                }
+
+                return true
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to show full screen alert activity", e)
+
+                if (canDrawOverlays(context)) {
+                    Log.w(TAG, "Activity failed, trying overlay as fallback")
+                    try {
+                        val intent = Intent(context, FullScreenOverlayService::class.java).apply {
+                            putExtra(EXTRA_TITLE, title)
+                            putExtra(EXTRA_DESCRIPTION, description)
+                            putExtra(EXTRA_PICTURE_LINK, pictureLink)
+                            putExtra(EXTRA_ICON, icon)
+                            putExtra(EXTRA_ACTION_LINK, actionLink)
+                            putExtra(EXTRA_GUID, guid)
+                        }
+                        context.startService(intent)
+                        return true
+                    } catch (overlayException: Exception) {
+                        Log.e(TAG, "Overlay fallback also failed", overlayException)
+                    }
+                }
+
+                return false
             }
-            context.startService(intent)
         }
 
         private fun canDrawOverlays(context: Context): Boolean {
@@ -189,18 +219,28 @@ class FullScreenOverlayService : Service() {
                     WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
                 } else {
                     @Suppress("DEPRECATION")
-                    WindowManager.LayoutParams.TYPE_PHONE
+                    WindowManager.LayoutParams.TYPE_SYSTEM_ALERT
                 }
                 format = PixelFormat.TRANSLUCENT
-                flags = WindowManager.LayoutParams.FLAG_FULLSCREEN or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+
+                flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or
                         WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                        WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
-                        WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                        WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                        WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+
                 width = WindowManager.LayoutParams.MATCH_PARENT
                 height = WindowManager.LayoutParams.MATCH_PARENT
                 gravity = Gravity.CENTER
+
+                systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                        View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                        View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                        View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                        View.SYSTEM_UI_FLAG_FULLSCREEN or
+                        View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
             }
 
             setupViewContent(title, description, pictureLink, icon, actionLink, guid)
