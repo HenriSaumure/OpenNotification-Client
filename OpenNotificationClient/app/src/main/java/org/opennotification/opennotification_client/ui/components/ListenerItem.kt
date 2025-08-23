@@ -72,7 +72,7 @@ fun ListenerItem(
             ) {
                 Text(
                     text = listener.guid,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
             }

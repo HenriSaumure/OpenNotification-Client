@@ -1,6 +1,7 @@
 package org.opennotification.opennotification_client.ui.screens
 
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -34,6 +35,10 @@ fun SettingsScreen(
     val serverUrl by viewModel.serverUrl.collectAsState()
 
     var newServerUrl by remember { mutableStateOf("") }
+
+    BackHandler {
+        onBackClick()
+    }
 
     LaunchedEffect(serverUrl) {
         newServerUrl = serverUrl
@@ -184,6 +189,18 @@ fun SettingsScreen(
                             permissionManager.requestIgnoreBatteryOptimization(context as androidx.activity.ComponentActivity)
                         }
                     )
+
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                        PermissionItem(
+                            icon = Icons.Default.Notifications,
+                            title = "Display Over Other Apps",
+                            description = "Enable full-screen alert overlays on top of any app (like timer alarms). Optional but recommended for urgent notifications.",
+                            isGranted = permissionSummary.overlayPermissionGranted,
+                            onRequest = {
+                                permissionManager.requestOverlayPermission(context as androidx.activity.ComponentActivity)
+                            }
+                        )
+                    }
 
                     if (permissionSummary.allPermissionsGranted) {
                         Card(

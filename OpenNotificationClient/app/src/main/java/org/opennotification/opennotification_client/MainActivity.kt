@@ -43,10 +43,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         permissionManager = PermissionManager(this)
-        if (!permissionManager.isBatteryOptimizationIgnored()) {
+
+        if (!permissionManager.isBatteryOptimizationIgnored() && permissionManager.shouldShowPermissionDialog()) {
             android.util.Log.w("MainActivity", "Battery optimization is NOT ignored - app will be killed when swiped away!")
             showPermissionDialog = true
         }
+
         org.opennotification.opennotification_client.service.WebSocketService.startService(this)
         permissionManager.onPermissionChanged = { newSummary ->
             permissionSummary = newSummary
@@ -90,7 +92,18 @@ class MainActivity : ComponentActivity() {
                                     permissionManager.openBatteryOptimizationSettings(this@MainActivity)
                                 }
                             },
+                            onOverlayPermissionRequest = {
+                                try {
+                                    permissionManager.requestOverlayPermission(this@MainActivity)
+                                } catch (e: Exception) {
+                                    permissionManager.openAppSettings(this@MainActivity)
+                                }
+                            },
                             onDismiss = {
+                                showPermissionDialog = false
+                            },
+                            onDontShowAgain = {
+                                permissionManager.setDontShowPermissionDialog()
                                 showPermissionDialog = false
                             }
                         )
@@ -121,9 +134,13 @@ class MainActivity : ComponentActivity() {
     private fun updatePermissionSummary() {
         try {
             permissionSummary = permissionManager.getPermissionSummary()
-            if (!permissionSummary.allPermissionsGranted && !showPermissionDialog) {
+
+            if (!permissionSummary.allPermissionsGranted &&
+                !showPermissionDialog &&
+                permissionManager.shouldShowPermissionDialog()) {
                 showPermissionDialog = true
             }
+
             if (permissionSummary.allPermissionsGranted && showPermissionDialog) {
                 showPermissionDialog = false
             }

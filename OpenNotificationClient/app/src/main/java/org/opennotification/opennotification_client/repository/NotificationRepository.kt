@@ -10,7 +10,6 @@ class NotificationRepository(private val database: AppDatabase) {
     private val notificationDao = database.notificationDao()
     private val listenerDao = database.webSocketListenerDao()
 
-    // Notification operations
     fun getAllNotifications(): Flow<List<Notification>> {
         return notificationDao.getAllNotifications()
     }
@@ -31,7 +30,6 @@ class NotificationRepository(private val database: AppDatabase) {
         return notificationDao.getNotificationCount()
     }
 
-    // WebSocket Listener operations
     fun getAllListeners(): Flow<List<WebSocketListener>> {
         return listenerDao.getAllListeners()
     }

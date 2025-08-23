@@ -368,7 +368,7 @@ class WatchdogService : Service() {
                     try {
                         Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
                     } catch (e: Exception) {
-                        // Ignore - priority boosting is best effort
+
                     }
 
                     updateConsolidatedNotification()

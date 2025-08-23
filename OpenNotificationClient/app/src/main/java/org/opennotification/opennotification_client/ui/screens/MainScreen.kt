@@ -33,7 +33,7 @@ fun MainScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("OpenNotification Listeners") },
+                title = { Text("Connections") },
                 actions = {
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(
@@ -52,7 +52,8 @@ fun MainScreen(
         floatingActionButton = {
             FloatingActionButton(
                 onClick = { showAddDialog = true },
-                containerColor = MaterialTheme.colorScheme.primary
+                containerColor = MaterialTheme.colorScheme.primary,
+                shape = androidx.compose.foundation.shape.CircleShape
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Add Listener")
             }

@@ -19,6 +19,7 @@ import kotlinx.coroutines.withContext
 import org.opennotification.opennotification_client.MainActivity
 import org.opennotification.opennotification_client.R
 import org.opennotification.opennotification_client.data.models.Notification
+import org.opennotification.opennotification_client.service.FullScreenOverlayService
 import java.net.URL
 
 class NotificationDisplayManager(private val context: Context) {
@@ -84,7 +85,6 @@ class NotificationDisplayManager(private val context: Context) {
         try {
             Log.d(TAG, "Showing notification: ${notification.title}, isAlert: ${notification.isAlert}")
 
-            // For full-screen alerts, use a different approach
             if (notification.isAlert) {
                 showFullScreenAlert(notification)
                 return
@@ -119,7 +119,6 @@ class NotificationDisplayManager(private val context: Context) {
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE)
 
-            // Add action button if actionLink is provided
             if (!notification.actionLink.isNullOrBlank()) {
                 addActionButton(notificationBuilder, notification)
             }
@@ -132,7 +131,6 @@ class NotificationDisplayManager(private val context: Context) {
                 )
             }
 
-            // Handle icon and picture loading
             loadNotificationImages(notificationBuilder, notification, channelId, pendingIntent)
 
         } catch (e: Exception) {
@@ -142,19 +140,52 @@ class NotificationDisplayManager(private val context: Context) {
 
     private fun showFullScreenAlert(notification: Notification) {
         try {
-            Log.d(TAG, "Showing full-screen alert: ${notification.title}")
+            Log.d(TAG, "Showing full-screen overlay alert: ${notification.title}")
 
-            val fullScreenIntent = Intent(context, MainActivity::class.java).apply {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M &&
+                !android.provider.Settings.canDrawOverlays(context)) {
+                Log.w(TAG, "Overlay permission not granted, falling back to regular notification")
+                showRegularNotificationAsFallback(notification)
+                return
+            }
+
+            try {
+                FullScreenOverlayService.showAlert(
+                    context = context,
+                    title = notification.title,
+                    description = notification.description,
+                    pictureLink = notification.pictureLink,
+                    icon = notification.icon,
+                    actionLink = notification.actionLink,
+                    guid = notification.guid
+                )
+                Log.i(TAG, "Full-screen overlay service started successfully")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to show overlay, falling back to notification", e)
+                showRegularNotificationAsFallback(notification)
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to show full-screen alert", e)
+            showRegularNotificationAsFallback(notification)
+        }
+    }
+
+    private fun showRegularNotificationAsFallback(notification: Notification) {
+        try {
+            Log.w(TAG, "Falling back to regular notification for alert: ${notification.title}")
+
+            val intent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra("notification_id", notification.id)
                 putExtra("guid", notification.guid)
-                putExtra("is_full_screen_alert", true)
+                putExtra("is_alert_fallback", true)
             }
 
-            val fullScreenPendingIntent = PendingIntent.getActivity(
+            val pendingIntent = PendingIntent.getActivity(
                 context,
                 notification.hashCode(),
-                fullScreenIntent,
+                intent,
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 } else {
@@ -162,20 +193,15 @@ class NotificationDisplayManager(private val context: Context) {
                 }
             )
 
-            val notificationBuilder = NotificationCompat.Builder(context, FULL_SCREEN_ALERTS_CHANNEL_ID)
+            val notificationBuilder = NotificationCompat.Builder(context, ALERTS_CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_notification)
-                .setContentTitle(notification.title)
-                .setContentIntent(fullScreenPendingIntent)
-                .setFullScreenIntent(fullScreenPendingIntent, true)
+                .setContentTitle("⚠️ ${notification.title}")
+                .setContentIntent(pendingIntent)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setAutoCancel(true)
-                .setOngoing(false)
-
-            // Add action button if actionLink is provided
-            if (!notification.actionLink.isNullOrBlank()) {
-                addActionButton(notificationBuilder, notification)
-            }
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
             if (!notification.description.isNullOrBlank()) {
                 notificationBuilder.setContentText(notification.description)
@@ -185,11 +211,17 @@ class NotificationDisplayManager(private val context: Context) {
                 )
             }
 
-            // Handle icon and picture loading for full-screen alert
-            loadNotificationImages(notificationBuilder, notification, FULL_SCREEN_ALERTS_CHANNEL_ID, fullScreenPendingIntent)
+            if (!notification.actionLink.isNullOrBlank()) {
+                addActionButton(notificationBuilder, notification)
+            }
+
+            if (NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                notificationManager.notify(notification.hashCode(), notificationBuilder.build())
+                Log.i(TAG, "Alert fallback notification displayed")
+            }
 
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to show full-screen alert", e)
+            Log.e(TAG, "Failed to show fallback notification", e)
         }
     }
 
@@ -234,13 +266,11 @@ class NotificationDisplayManager(private val context: Context) {
                 var iconBitmap: Bitmap? = null
                 var pictureBitmap: Bitmap? = null
 
-                // Load icon if provided
                 if (!notification.icon.isNullOrBlank()) {
                     iconBitmap = loadImageFromUrl(notification.icon)
                     Log.d(TAG, "Icon loaded: ${iconBitmap != null}")
                 }
 
-                // Load picture if provided
                 if (!notification.pictureLink.isNullOrBlank()) {
                     pictureBitmap = loadImageFromUrl(notification.pictureLink)
                     Log.d(TAG, "Picture loaded: ${pictureBitmap != null}")
@@ -263,22 +293,18 @@ class NotificationDisplayManager(private val context: Context) {
                             else NotificationCompat.CATEGORY_MESSAGE
                         )
 
-                    // Set icon as large icon if available
                     if (iconBitmap != null) {
                         updatedBuilder.setLargeIcon(iconBitmap)
                     }
 
-                    // Add action button if actionLink is provided
                     if (!notification.actionLink.isNullOrBlank()) {
                         addActionButton(updatedBuilder, notification)
                     }
 
-                    // Handle full-screen intent for alerts
                     if (notification.isAlert) {
                         updatedBuilder.setFullScreenIntent(pendingIntent, true)
                     }
 
-                    // Configure notification style based on content
                     if (pictureBitmap != null) {
                         if (!notification.description.isNullOrBlank()) {
                             updatedBuilder.setContentText(notification.description)
@@ -313,7 +339,6 @@ class NotificationDisplayManager(private val context: Context) {
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error loading notification images", e)
-                // Fallback to showing notification without images
                 showNotificationWithoutImage(builder, notification)
             }
         }

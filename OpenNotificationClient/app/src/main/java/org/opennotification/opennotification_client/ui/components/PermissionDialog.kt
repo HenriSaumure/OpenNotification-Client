@@ -21,7 +21,9 @@ fun PermissionDialog(
     permissionSummary: PermissionManager.PermissionSummary,
     onNotificationPermissionRequest: () -> Unit,
     onBatteryOptimizationRequest: () -> Unit,
-    onDismiss: () -> Unit
+    onOverlayPermissionRequest: () -> Unit,
+    onDismiss: () -> Unit,
+    onDontShowAgain: () -> Unit
 ) {
     Dialog(onDismissRequest = onDismiss) {
         Card(
@@ -65,17 +67,40 @@ fun PermissionDialog(
                     isCritical = true
                 )
 
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                    PermissionItem(
+                        icon = Icons.Default.Notifications,
+                        title = "Display Over Other Apps",
+                        description = "Enable full-screen alert overlays that appear on top of any app (like timer alarms). Optional but recommended for urgent notifications.",
+                        isGranted = permissionSummary.overlayPermissionGranted,
+                        onRequest = onOverlayPermissionRequest,
+                        isCritical = false
+                    )
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (permissionSummary.allPermissionsGranted) {
-                        Button(onClick = onDismiss) {
-                            Text("Continue")
-                        }
-                    } else {
-                        TextButton(onClick = onDismiss) {
-                            Text("Skip for Now")
+                    TextButton(
+                        onClick = onDontShowAgain,
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    ) {
+                        Text("Don't show again")
+                    }
+
+                    Row {
+                        if (permissionSummary.allPermissionsGranted) {
+                            Button(onClick = onDismiss) {
+                                Text("Continue")
+                            }
+                        } else {
+                            TextButton(onClick = onDismiss) {
+                                Text("Skip for Now")
+                            }
                         }
                     }
                 }

@@ -31,7 +31,7 @@ fun AddListenerDialog(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Text(
-                    text = "Add New WebSocket Listener",
+                    text = "New Connection",
                     style = MaterialTheme.typography.headlineSmall
                 )
 

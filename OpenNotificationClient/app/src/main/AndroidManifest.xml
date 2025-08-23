@@ -85,6 +85,17 @@
             </intent-filter>
         </activity>
 
+        <!-- Full Screen Alert Activity -->
+        <activity
+            android:name=".ui.activities.FullScreenAlertActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+            android:launchMode="singleInstance"
+            android:excludeFromRecents="true"
+            android:showOnLockScreen="true"
+            android:turnScreenOn="true"
+            android:screenOrientation="portrait" />
+
         <!-- WebSocket Background Service -->
         <service
             android:name=".service.WebSocketService"
@@ -94,6 +105,13 @@
             android:stopWithTask="false"
             android:directBootAware="true"
             android:isolatedProcess="false" />
+
+        <!-- Full Screen Overlay Service for system-wide alerts -->
+        <service
+            android:name=".service.FullScreenOverlayService"
+            android:enabled="true"
+            android:exported="false"
+            android:stopWithTask="false" />
 
         <!-- Watchdog Service - monitors and restarts WebSocket service -->
         <service

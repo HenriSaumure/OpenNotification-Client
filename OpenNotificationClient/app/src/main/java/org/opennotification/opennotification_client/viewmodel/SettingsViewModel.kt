@@ -56,14 +56,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 val webSocketUrl = convertToWebSocketUrl(cleanUrl)
 
                 if (isValidWebSocketUrl(webSocketUrl)) {
-                    // Save to preferences
                     sharedPreferences.edit()
                         .putString(KEY_SERVER_URL, webSocketUrl)
                         .apply()
 
                     _serverUrl.value = webSocketUrl
 
-                    // Update WebSocketManager with new URL
                     webSocketManager.updateServerUrl(webSocketUrl)
 
                     Log.i(TAG, "Server URL updated to: $webSocketUrl")
@@ -78,7 +76,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun requestNotificationPermission() {
         try {
-            // Open notification settings directly since we can't request from ViewModel
             openNotificationSettings()
         } catch (e: Exception) {
             Log.e(TAG, "Error requesting notification permission", e)
@@ -87,7 +84,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun requestBatteryOptimization() {
         try {
-            // Open battery optimization settings directly
             openBatterySettings()
         } catch (e: Exception) {
             Log.e(TAG, "Error requesting battery optimization", e)
@@ -96,7 +92,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun openNotificationSettings() {
         try {
-            // This will need to be handled by the UI since we need activity context
             Log.d(TAG, "Notification settings should be opened")
         } catch (e: Exception) {
             Log.e(TAG, "Error opening notification settings", e)
@@ -105,7 +100,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun openBatterySettings() {
         try {
-            // This will need to be handled by the UI since we need activity context
             Log.d(TAG, "Battery settings should be opened")
         } catch (e: Exception) {
             Log.e(TAG, "Error opening battery settings", e)
@@ -115,13 +109,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private fun convertToWebSocketUrl(url: String): String {
         val trimmedUrl = url.trim()
 
-        // Convert https:// to wss:// and http:// to ws://
         return when {
             trimmedUrl.startsWith("https://") -> trimmedUrl.replace("https://", "wss://")
             trimmedUrl.startsWith("http://") -> trimmedUrl.replace("http://", "ws://")
             trimmedUrl.startsWith("wss://") || trimmedUrl.startsWith("ws://") -> trimmedUrl
             else -> {
-                // If no protocol specified, assume secure WebSocket
                 if (trimmedUrl.isNotEmpty()) "wss://$trimmedUrl" else trimmedUrl
             }
         }

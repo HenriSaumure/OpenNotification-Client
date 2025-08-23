@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Process
 import android.util.Log
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -78,7 +79,7 @@ class MemoryPressureHandler(private val context: Context) : ComponentCallbacks2 
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
-        // Required implementation - no action needed
+
     }
 
     override fun onLowMemory() {
@@ -91,13 +92,10 @@ class MemoryPressureHandler(private val context: Context) : ComponentCallbacks2 
             try {
                 Log.w(TAG, "Handling critical memory pressure")
 
-                // Schedule immediate resurrection in case we're killed
                 scheduleImmediateResurrection()
 
-                // Force garbage collection
                 System.gc()
 
-                // Reduce memory footprint by disconnecting idle connections
                 val webSocketManager = org.opennotification.opennotification_client.network.WebSocketManager.getInstance()
                 val errorConnections = webSocketManager.getErrorConnections()
                 if (errorConnections.isNotEmpty()) {
@@ -107,7 +105,6 @@ class MemoryPressureHandler(private val context: Context) : ComponentCallbacks2 
                     }
                 }
 
-                // Increase service priority
                 setHighPriorityOomAdj()
 
                 Log.i(TAG, "Critical memory pressure handling completed")
@@ -122,10 +119,8 @@ class MemoryPressureHandler(private val context: Context) : ComponentCallbacks2 
             try {
                 Log.w(TAG, "Handling moderate memory pressure")
 
-                // Force garbage collection
                 System.gc()
 
-                // Schedule resurrection as precaution
                 scheduleImmediateResurrection()
 
                 Log.i(TAG, "Moderate memory pressure handling completed")
@@ -140,13 +135,10 @@ class MemoryPressureHandler(private val context: Context) : ComponentCallbacks2 
             try {
                 Log.w(TAG, "Preparing for potential termination")
 
-                // Schedule resurrection
                 scheduleImmediateResurrection()
 
-                // Ensure watchdog service is running with highest priority
                 WatchdogService.startService(context)
 
-                // Start keep-alive system if not running
                 ConnectionKeepAlive.startKeepAlive(context)
 
                 Log.i(TAG, "Termination preparation completed")
@@ -158,13 +150,10 @@ class MemoryPressureHandler(private val context: Context) : ComponentCallbacks2 
 
     private fun setHighPriorityOomAdj() {
         try {
-            // Try to set process priority to foreground
             Process.setThreadPriority(Process.THREAD_PRIORITY_FOREGROUND)
 
-            // Get activity manager and try to move to foreground importance
             val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
 
-            // Log current memory info
             val memoryInfo = ActivityManager.MemoryInfo()
             activityManager.getMemoryInfo(memoryInfo)
 
@@ -178,7 +167,7 @@ class MemoryPressureHandler(private val context: Context) : ComponentCallbacks2 
     }
 
     private fun scheduleImmediateResurrection() {
-        scheduleResurrection(2000L) // 2 seconds
+        scheduleResurrection(2000L)
     }
 
     private fun schedulePeriodicResurrection() {
@@ -201,7 +190,6 @@ class MemoryPressureHandler(private val context: Context) : ComponentCallbacks2 
 
             val triggerTime = System.currentTimeMillis() + delay
 
-            // Use the most aggressive alarm type available
             when {
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> {
                     alarmManager.setExactAndAllowWhileIdle(
@@ -251,7 +239,12 @@ class MemoryPressureHandler(private val context: Context) : ComponentCallbacks2 
     private fun registerResurrectionReceiver() {
         resurrectionReceiver = ResurrectionReceiver()
         val filter = android.content.IntentFilter(ACTION_RESURRECTION)
-        context.registerReceiver(resurrectionReceiver, filter)
+        ContextCompat.registerReceiver(
+            context,
+            resurrectionReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
         Log.i(TAG, "Resurrection receiver registered")
     }
 
@@ -271,7 +264,6 @@ class MemoryPressureHandler(private val context: Context) : ComponentCallbacks2 
 
                 scope.launch {
                     try {
-                        // Check if watchdog service is running
                         val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
                         @Suppress("DEPRECATION")
                         val services = activityManager.getRunningServices(Integer.MAX_VALUE)
@@ -283,13 +275,11 @@ class MemoryPressureHandler(private val context: Context) : ComponentCallbacks2 
                             Log.w(TAG, "Watchdog service not running - restarting it")
                             WatchdogService.startService(context)
 
-                            // Also restart keep-alive
                             ConnectionKeepAlive.startKeepAlive(context)
                         } else {
                             Log.d(TAG, "Watchdog service is running normally")
                         }
 
-                        // Schedule next resurrection check
                         schedulePeriodicResurrection()
 
                     } catch (e: Exception) {

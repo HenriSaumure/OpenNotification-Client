@@ -21,9 +21,14 @@ class PermissionManager(private val context: Context) {
         const val NOTIFICATION_PERMISSION_REQUEST_CODE = 1001
         const val BATTERY_OPTIMIZATION_REQUEST_CODE = 1002
         const val FULL_SCREEN_INTENT_REQUEST_CODE = 1003
+
+        private const val PREFS_NAME = "permission_preferences"
+        private const val KEY_DONT_SHOW_PERMISSION_DIALOG = "dont_show_permission_dialog"
     }
 
     var onPermissionChanged: ((PermissionSummary) -> Unit)? = null
+
+    private val sharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     fun isNotificationPermissionGranted(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -37,11 +42,11 @@ class PermissionManager(private val context: Context) {
     }
 
     fun isFullScreenIntentPermissionGranted(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { // Android 14+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.canUseFullScreenIntent()
         } else {
-            true // Not required for older versions
+            true
         }
     }
 
@@ -67,7 +72,6 @@ class PermissionManager(private val context: Context) {
                 Log.i(TAG, "Opened full-screen intent permission settings")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to open full-screen intent settings", e)
-                // Fallback to general app settings
                 openNotificationSettings(activity)
             }
         }
@@ -98,7 +102,6 @@ class PermissionManager(private val context: Context) {
                     Log.i(TAG, "Opened battery optimization request dialog")
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to open battery optimization request dialog", e)
-                    // Fallback to general battery optimization settings
                     openBatteryOptimizationSettings(activity)
                 }
             } else {
@@ -149,7 +152,6 @@ class PermissionManager(private val context: Context) {
     fun requestBackgroundAppPermissions(activity: Activity) {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // For Android 10+, also check background app restrictions
                 val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                     data = Uri.parse("package:${context.packageName}")
                 }
@@ -161,20 +163,56 @@ class PermissionManager(private val context: Context) {
         }
     }
 
+    fun isOverlayPermissionGranted(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Settings.canDrawOverlays(context)
+        } else {
+            true
+        }
+    }
+
+    fun requestOverlayPermission(activity: Activity) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                }
+                activity.startActivity(intent)
+                Log.i(TAG, "Opened overlay permission settings")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to open overlay permission settings", e)
+                openAppSettings(activity)
+            }
+        }
+    }
+
+    fun openAppSettings(activity: Activity) {
+        try {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:${context.packageName}")
+            }
+            activity.startActivity(intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to open app settings", e)
+        }
+    }
+
     fun hasAllBackgroundPermissions(): Boolean {
         val batteryOptimized = isBatteryOptimizationIgnored()
         val notificationEnabled = isNotificationPermissionGranted()
         val fullScreenIntentEnabled = isFullScreenIntentPermissionGranted()
+        val overlayEnabled = isOverlayPermissionGranted()
 
-        Log.d(TAG, "Permission check - Battery optimized: $batteryOptimized, Notifications: $notificationEnabled, Full-screen intent: $fullScreenIntentEnabled")
-        return batteryOptimized && notificationEnabled && fullScreenIntentEnabled
+        Log.d(TAG, "Permission check - Battery optimized: $batteryOptimized, Notifications: $notificationEnabled, Full-screen intent: $fullScreenIntentEnabled, Overlay: $overlayEnabled")
+        return batteryOptimized && notificationEnabled && fullScreenIntentEnabled && overlayEnabled
     }
 
     fun getPermissionSummary(): PermissionSummary {
         return PermissionSummary(
             notificationPermissionGranted = isNotificationPermissionGranted(),
             batteryOptimizationIgnored = isBatteryOptimizationIgnored(),
-            fullScreenIntentPermissionGranted = isFullScreenIntentPermissionGranted()
+            fullScreenIntentPermissionGranted = isFullScreenIntentPermissionGranted(),
+            overlayPermissionGranted = isOverlayPermissionGranted()
         )
     }
 
@@ -183,12 +221,31 @@ class PermissionManager(private val context: Context) {
         onPermissionChanged?.invoke(currentSummary)
     }
 
+    fun shouldShowPermissionDialog(): Boolean {
+        return !sharedPreferences.getBoolean(KEY_DONT_SHOW_PERMISSION_DIALOG, false)
+    }
+
+    fun setDontShowPermissionDialog() {
+        sharedPreferences.edit()
+            .putBoolean(KEY_DONT_SHOW_PERMISSION_DIALOG, true)
+            .apply()
+        Log.i(TAG, "User chose to not show permission dialog again")
+    }
+
+    fun resetPermissionDialogPreference() {
+        sharedPreferences.edit()
+            .putBoolean(KEY_DONT_SHOW_PERMISSION_DIALOG, false)
+            .apply()
+        Log.i(TAG, "Permission dialog preference reset - will show again")
+    }
+
     data class PermissionSummary(
         val notificationPermissionGranted: Boolean,
         val batteryOptimizationIgnored: Boolean,
-        val fullScreenIntentPermissionGranted: Boolean = true
+        val fullScreenIntentPermissionGranted: Boolean = true,
+        val overlayPermissionGranted: Boolean = true
     ) {
         val allPermissionsGranted: Boolean
-            get() = notificationPermissionGranted && batteryOptimizationIgnored && fullScreenIntentPermissionGranted
+            get() = notificationPermissionGranted && batteryOptimizationIgnored && fullScreenIntentPermissionGranted && overlayPermissionGranted
     }
 }
