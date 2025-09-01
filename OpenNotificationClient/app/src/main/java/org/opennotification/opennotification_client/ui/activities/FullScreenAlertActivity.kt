@@ -411,9 +411,5 @@ class FullScreenAlertActivity : Activity() {
         Log.d(TAG, "FullScreenAlertActivity destroyed")
     }
 
-    @Suppress("DEPRECATION")
-    override fun onBackPressed() {
-        // Prevent back button from dismissing the alert
-        // User must use dismiss button or swipe gestures
-    }
+
 }

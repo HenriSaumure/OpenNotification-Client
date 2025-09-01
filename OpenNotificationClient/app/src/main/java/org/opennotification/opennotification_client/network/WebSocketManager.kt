@@ -2,14 +2,15 @@ package org.opennotification.opennotification_client.network
 
 import android.content.Context
 import android.util.Log
-import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -27,6 +28,7 @@ class WebSocketManager private constructor() {
         private const val TAG = "WebSocketManager"
         private var BASE_WS_URL = "wss://api.opennotification.org/ws"
         private const val RECONNECT_DELAY = 5000L
+        private const val CONNECTION_MONITOR_INTERVAL = 5000L // Monitor connections every 5 seconds
         private const val PREFS_NAME = "opennotification_settings"
         private const val KEY_SERVER_URL = "server_url"
         private const val DEFAULT_SERVER_URL = "https://api.opennotification.org"
@@ -64,12 +66,16 @@ class WebSocketManager private constructor() {
     val connectionStatuses: StateFlow<Map<String, ConnectionStatus>> = _connectionStatuses
     var onNotificationReceived: ((Notification) -> Unit)? = null
     private val activeListenerGuids = ConcurrentHashMap.newKeySet<String>()
+    private var connectionMonitorJob: Job? = null
+    private var isMonitoringActive = false
 
     data class WebSocketConnection(
         val webSocket: WebSocket?,
         val status: ConnectionStatus,
         val reconnectJob: Job?,
-        val lastReconnectAttempt: Long = 0L
+        val lastReconnectAttempt: Long = 0L,
+        val reconnectAttempts: Int = 0,
+        val lastSuccessfulConnection: Long = 0L
     )
 
     fun connectToGuid(guid: String) {
@@ -102,15 +108,15 @@ class WebSocketManager private constructor() {
             Log.w(TAG, "Connection was marked as ERROR for GUID: $guid - forcing fresh reconnection")
         }
 
-        if (isActuallyConnected && currentConnection?.status == ConnectionStatus.CONNECTED && !wasJustMarkedAsError) {
+        if (isActuallyConnected && !wasJustMarkedAsError) {
             Log.d(TAG, "Already connected to GUID: $guid (verified working connection)")
             return
         }
 
-        if ((currentConnection?.status == ConnectionStatus.CONNECTED && !isActuallyConnected) || wasJustMarkedAsError) {
-            Log.w(TAG, "Connection marked as ${currentConnection?.status} but forcing cleanup for GUID: $guid")
+        if (currentConnection != null && ((currentConnection.status == ConnectionStatus.CONNECTED && !isActuallyConnected) || wasJustMarkedAsError)) {
+            Log.w(TAG, "Connection marked as ${currentConnection.status} but forcing cleanup for GUID: $guid")
             try {
-                currentConnection?.webSocket?.close(1000, "Force cleanup due to ${if (wasJustMarkedAsError) "ERROR state" else "dead connection"}")
+                currentConnection.webSocket?.close(1000, "Force cleanup due to ${if (wasJustMarkedAsError) "ERROR state" else "dead connection"}")
             } catch (e: Exception) {
                 Log.w(TAG, "Error closing WebSocket during cleanup for GUID: $guid", e)
             }
@@ -164,6 +170,121 @@ class WebSocketManager private constructor() {
         attemptConnection(guid, BASE_WS_URL, true)
     }
 
+    /**
+     * Starts persistent background monitoring that checks connections every 5 seconds
+     * and ensures failed connections always retry
+     */
+    private fun startConnectionMonitoring() {
+        if (isMonitoringActive) {
+            Log.d(TAG, "Connection monitoring already active")
+            return
+        }
+
+        Log.i(TAG, "Starting persistent connection monitoring (every ${CONNECTION_MONITOR_INTERVAL}ms)")
+        isMonitoringActive = true
+
+        connectionMonitorJob = scope.launch {
+            while (isActive && isMonitoringActive) {
+                try {
+                    monitorAndReconnectConnections()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error in connection monitoring", e)
+                }
+
+                delay(CONNECTION_MONITOR_INTERVAL)
+            }
+        }
+    }
+
+    /**
+     * Stops persistent background monitoring
+     */
+    private fun stopConnectionMonitoring() {
+        Log.i(TAG, "Stopping connection monitoring")
+        isMonitoringActive = false
+        connectionMonitorJob?.cancel()
+        connectionMonitorJob = null
+    }
+
+    /**
+     * Monitors all connections and ensures disconnected/error connections always retry
+     */
+    private fun monitorAndReconnectConnections() {
+        if (activeListenerGuids.isEmpty()) {
+            return
+        }
+
+        Log.d(TAG, "Monitoring ${activeListenerGuids.size} active listener connections")
+
+        activeListenerGuids.forEach { guid ->
+            val connection = connections[guid]
+            val currentTime = System.currentTimeMillis()
+
+            when {
+                connection == null -> {
+                    Log.w(TAG, "No connection found for active GUID: $guid - creating new connection")
+                    connectToGuid(guid)
+                }
+
+                connection.status == ConnectionStatus.ERROR ||
+                        connection.status == ConnectionStatus.DISCONNECTED -> {
+                    val timeSinceLastAttempt = currentTime - connection.lastReconnectAttempt
+
+                    if (timeSinceLastAttempt >= RECONNECT_DELAY) {
+                        Log.i(TAG, "Retrying connection for GUID: $guid (status: ${connection.status}, last attempt: ${timeSinceLastAttempt}ms ago)")
+                        connectToGuid(guid)
+                    } else {
+                        Log.d(TAG, "GUID: $guid scheduled for retry in ${RECONNECT_DELAY - timeSinceLastAttempt}ms")
+                    }
+                }
+
+                connection.status == ConnectionStatus.CONNECTING -> {
+                    val timeSinceLastAttempt = currentTime - connection.lastReconnectAttempt
+
+                    if (timeSinceLastAttempt > 30000L) { // 30 seconds timeout
+                        Log.w(TAG, "Connection attempt timed out for GUID: $guid - forcing fresh attempt")
+                        connectToGuid(guid)
+                    }
+                }
+
+                connection.status == ConnectionStatus.CONNECTED -> {
+                    // Verify connection is actually working
+                    val isHealthy = verifyConnectionHealth(guid, connection)
+                    if (!isHealthy) {
+                        Log.w(TAG, "Connected WebSocket for GUID: $guid appears unhealthy - forcing reconnection")
+                        updateConnectionStatus(guid, ConnectionStatus.ERROR)
+                        connectToGuid(guid)
+                    }
+                }
+            }
+        }
+
+        val connectedCount = connections.values.count { it.status == ConnectionStatus.CONNECTED }
+        val totalActive = activeListenerGuids.size
+
+        Log.d(TAG, "Connection monitoring: $connectedCount/$totalActive connections healthy")
+    }
+
+    /**
+     * Verifies if a WebSocket connection is actually healthy
+     */
+    private fun verifyConnectionHealth(guid: String, connection: WebSocketConnection): Boolean {
+        return try {
+            connection.webSocket?.let { ws ->
+                // Try to send an empty message to test the connection
+                val testResult = ws.send("")
+                if (!testResult) {
+                    Log.w(TAG, "Health check failed for GUID: $guid - send returned false")
+                    return false
+                }
+                true
+            } ?: false
+        } catch (e: Exception) {
+            Log.w(TAG, "Health check failed for GUID: $guid", e)
+            false
+        }
+    }
+
     private fun attemptConnection(guid: String, wsUrl: String, isPrimaryAttempt: Boolean) {
         val request = Request.Builder()
             .url("$wsUrl/$guid")
@@ -178,12 +299,19 @@ class WebSocketManager private constructor() {
                     webSocket = webSocket,
                     status = ConnectionStatus.CONNECTED,
                     reconnectJob = null,
-                    lastReconnectAttempt = System.currentTimeMillis()
+                    lastReconnectAttempt = System.currentTimeMillis(),
+                    reconnectAttempts = 0, // Reset attempts on successful connection
+                    lastSuccessfulConnection = System.currentTimeMillis()
                 )
                 updateConnectionStatus(guid, ConnectionStatus.CONNECTED)
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                // Update last successful connection time on any message
+                connections[guid]?.let { connection ->
+                    connections[guid] = connection.copy(lastSuccessfulConnection = System.currentTimeMillis())
+                }
+
                 if (text.trim().equals("TEST_FULL_SCREEN", ignoreCase = true)) {
                     Log.i(TAG, "TEST COMMAND RECEIVED - Triggering test full screen alert")
                     val testNotification = Notification(
@@ -226,10 +354,14 @@ class WebSocketManager private constructor() {
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                Log.w(TAG, "WebSocket closed for GUID: $guid")
+                Log.w(TAG, "WebSocket closed for GUID: $guid (code: $code, reason: $reason)")
                 connectingGuids.remove(guid)
                 updateConnectionStatus(guid, ConnectionStatus.DISCONNECTED)
-                scheduleReconnect(guid, "Connection closed")
+
+                // Always schedule reconnect for active listeners
+                if (activeListenerGuids.contains(guid)) {
+                    scheduleReconnect(guid, "Connection closed (code: $code)")
+                }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -238,11 +370,9 @@ class WebSocketManager private constructor() {
 
                 val isConnectionIssue = t.message?.contains("Software caused connection abort") == true ||
                         t.message?.contains("Connection reset") == true ||
-                        t.message?.contains("Connection refused") == true
-
-                if (isConnectionIssue) {
-                    Log.w(TAG, "Detected connection issue for GUID: $guid - scheduling immediate reconnect")
-                }
+                        t.message?.contains("Connection refused") == true ||
+                        t.message?.contains("failed to connect") == true ||
+                        t.message?.contains("timeout") == true
 
                 if (isPrimaryAttempt && wsUrl.endsWith("/")) {
                     val fallbackUrl = wsUrl.removeSuffix("/")
@@ -252,17 +382,24 @@ class WebSocketManager private constructor() {
                 }
 
                 updateConnectionStatus(guid, ConnectionStatus.ERROR)
-                val reconnectDelay = if (isConnectionIssue) 2000L else RECONNECT_DELAY
-                scheduleReconnect(guid, "Connection failed: ${t.message}", reconnectDelay)
+
+                // Always schedule reconnect for active listeners, with shorter delay for connection issues
+                if (activeListenerGuids.contains(guid)) {
+                    val reconnectDelay = if (isConnectionIssue) 3000L else RECONNECT_DELAY
+                    scheduleReconnect(guid, "Connection failed: ${t.message}", reconnectDelay)
+                }
             }
         }
 
         val webSocket = okHttpClient.newWebSocket(request, webSocketListener)
+        val currentConnection = connections[guid]
         connections[guid] = WebSocketConnection(
             webSocket = webSocket,
             status = ConnectionStatus.CONNECTING,
             reconnectJob = null,
-            lastReconnectAttempt = System.currentTimeMillis()
+            lastReconnectAttempt = System.currentTimeMillis(),
+            reconnectAttempts = currentConnection?.reconnectAttempts ?: 0,
+            lastSuccessfulConnection = currentConnection?.lastSuccessfulConnection ?: 0L
         )
     }
 
@@ -286,23 +423,27 @@ class WebSocketManager private constructor() {
 
     fun disconnectAll() {
         Log.d(TAG, "Disconnecting all WebSocket connections")
+        stopConnectionMonitoring()
         connections.keys.forEach { guid ->
             disconnectFromGuid(guid)
         }
     }
 
     private fun scheduleReconnect(guid: String, reason: String = "Unknown", delay: Long = RECONNECT_DELAY) {
-        if (!connections.containsKey(guid)) {
-            Log.d(TAG, "Not scheduling reconnect for GUID: $guid - listener was disconnected")
+        if (!activeListenerGuids.contains(guid)) {
+            Log.d(TAG, "Not scheduling reconnect for GUID: $guid - listener was deactivated")
             return
         }
 
-        Log.i(TAG, "Scheduling reconnect for GUID: $guid in ${delay}ms due to: $reason")
+        val currentConnection = connections[guid]
+        val attempts = (currentConnection?.reconnectAttempts ?: 0) + 1
+
+        Log.i(TAG, "Scheduling reconnect #$attempts for GUID: $guid in ${delay}ms due to: $reason")
 
         val reconnectJob = scope.launch {
-            kotlinx.coroutines.delay(delay)
-            if (connections.containsKey(guid)) {
-                Log.d(TAG, "Attempting to reconnect to GUID: $guid after $reason")
+            delay(delay)
+            if (activeListenerGuids.contains(guid)) {
+                Log.d(TAG, "Attempting to reconnect to GUID: $guid after $reason (attempt #$attempts)")
                 connectToGuid(guid)
             } else {
                 Log.d(TAG, "Skipping reconnect for GUID: $guid - listener was deactivated")
@@ -311,12 +452,14 @@ class WebSocketManager private constructor() {
 
         connections[guid] = connections[guid]?.copy(
             reconnectJob = reconnectJob,
-            lastReconnectAttempt = System.currentTimeMillis()
+            lastReconnectAttempt = System.currentTimeMillis(),
+            reconnectAttempts = attempts
         ) ?: WebSocketConnection(
             webSocket = null,
             status = ConnectionStatus.DISCONNECTED,
             reconnectJob = reconnectJob,
-            lastReconnectAttempt = System.currentTimeMillis()
+            lastReconnectAttempt = System.currentTimeMillis(),
+            reconnectAttempts = attempts
         )
     }
 
@@ -374,7 +517,7 @@ class WebSocketManager private constructor() {
 
         if (activeGuids.isNotEmpty()) {
             scope.launch {
-                kotlinx.coroutines.delay(500)
+                delay(500)
                 Log.i(TAG, "Reconnecting ${activeGuids.size} listeners with new URL")
 
                 activeGuids.forEach { guid ->
@@ -432,6 +575,13 @@ class WebSocketManager private constructor() {
             }
 
             Log.i(TAG, "Active listeners update completed: ${activeGuids.size} active, ${toDisconnect.size} stopped, ${toConnect.size} started")
+
+            // Start connection monitoring if we have active listeners
+            if (activeGuids.isNotEmpty() && !isMonitoringActive) {
+                startConnectionMonitoring()
+            } else if (activeGuids.isEmpty() && isMonitoringActive) {
+                stopConnectionMonitoring()
+            }
         }
     }
 
@@ -506,7 +656,7 @@ class WebSocketManager private constructor() {
         }
 
         scope.launch {
-            kotlinx.coroutines.delay(500)
+            delay(500)
 
             Log.i(TAG, "Starting forced reconnection for ${activeGuids.size} listeners")
 
