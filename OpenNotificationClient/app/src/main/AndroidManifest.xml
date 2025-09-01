@@ -28,9 +28,12 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
     <!-- Lock screen notification permissions -->
-    <uses-permission android:name="android.permission.SHOW_KEYGUARD_MESSAGE" />
-    <uses-permission android:name="android.permission.INTERNAL_SYSTEM_WINDOW" />
-    <uses-permission android:name="android.permission.SYSTEM_APPLICATION_OVERLAY" />
+    <uses-permission android:name="android.permission.SHOW_KEYGUARD_MESSAGE"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.INTERNAL_SYSTEM_WINDOW"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.SYSTEM_APPLICATION_OVERLAY"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- Memory pressure resistance permissions -->
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
