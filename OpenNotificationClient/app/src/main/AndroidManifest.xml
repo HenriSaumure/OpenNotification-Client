@@ -19,7 +19,6 @@
 
     <!-- Battery optimization and background execution -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!-- Additional permissions for better background execution -->
@@ -144,10 +143,14 @@
             android:enabled="true"
             android:exported="true"
             android:directBootAware="true">
+            <!-- Boot events intent filter (no data scheme) -->
             <intent-filter android:priority="1000">
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+            <!-- Package replacement events intent filter (with data scheme) -->
+            <intent-filter android:priority="1000">
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.PACKAGE_REPLACED" />
                 <data android:scheme="package" />
@@ -166,7 +169,7 @@
 
         <!-- Resurrection receiver for automatic service revival -->
         <receiver
-            android:name=".utils.MemoryPressureHandler$ResurrectionReceiver"
+            android:name=".utils.ResurrectionReceiver"
             android:enabled="true"
             android:exported="false">
             <intent-filter>

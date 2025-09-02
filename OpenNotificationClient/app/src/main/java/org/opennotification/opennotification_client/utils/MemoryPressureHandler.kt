@@ -257,36 +257,4 @@ class MemoryPressureHandler(private val context: Context) : ComponentCallbacks2 
         }
     }
 
-    inner class ResurrectionReceiver : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action == ACTION_RESURRECTION) {
-                Log.w(TAG, "Resurrection alarm triggered - checking if services need restart")
-
-                scope.launch {
-                    try {
-                        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-                        @Suppress("DEPRECATION")
-                        val services = activityManager.getRunningServices(Integer.MAX_VALUE)
-                        val watchdogRunning = services.any {
-                            it.service.className == "org.opennotification.opennotification_client.service.WatchdogService"
-                        }
-
-                        if (!watchdogRunning) {
-                            Log.w(TAG, "Watchdog service not running - restarting it")
-                            WatchdogService.startService(context)
-
-                            ConnectionKeepAlive.startKeepAlive(context)
-                        } else {
-                            Log.d(TAG, "Watchdog service is running normally")
-                        }
-
-                        schedulePeriodicResurrection()
-
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error in resurrection receiver", e)
-                    }
-                }
-            }
-        }
-    }
 }
