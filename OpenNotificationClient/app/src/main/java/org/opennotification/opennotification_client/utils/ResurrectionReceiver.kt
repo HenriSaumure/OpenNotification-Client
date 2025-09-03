@@ -9,11 +9,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import org.opennotification.opennotification_client.service.WatchdogService
 
 /**
- * Standalone ResurrectionReceiver that can be instantiated by the Android system.
- * This receiver handles resurrection alarms to restart services if they're killed.
+ * Simplified ResurrectionReceiver that only responds to alarms.
+ * Removed complex alarm scheduling to improve battery life.
  */
 class ResurrectionReceiver : BroadcastReceiver() {
     companion object {
@@ -27,31 +26,29 @@ class ResurrectionReceiver : BroadcastReceiver() {
         if (intent.action == ACTION_RESURRECTION) {
             Log.w(TAG, "Resurrection alarm triggered - checking if services need restart")
 
-
-            val pendingResult = goAsync() // goAsync to handle long running operations
+            val pendingResult = goAsync()
 
             scope.launch {
                 try {
-                    
                     val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
                     @Suppress("DEPRECATION")
                     val services = activityManager.getRunningServices(Integer.MAX_VALUE)
-                    val watchdogRunning = services.any {
-                        it.service.className == "org.opennotification.opennotification_client.service.WatchdogService"
+                    val webSocketServiceRunning = services.any {
+                        it.service.className == "org.opennotification.opennotification_client.service.WebSocketService"
                     }
 
-                    if (!watchdogRunning) {
-                        Log.w(TAG, "Watchdog service not running - restarting it")
+                    if (!webSocketServiceRunning) {
+                        Log.w(TAG, "WebSocketService not running - restarting it")
 
                         try {
-                            WatchdogService.startService(context)
+                            org.opennotification.opennotification_client.service.WebSocketService.startService(context)
                             ConnectionKeepAlive.startKeepAlive(context)
                             Log.i(TAG, "Services restarted successfully from resurrection")
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to restart services from resurrection", e)
                         }
                     } else {
-                        Log.d(TAG, "Watchdog service is running normally")
+                        Log.d(TAG, "WebSocketService is running normally")
                     }
 
                 } catch (e: Exception) {
@@ -60,8 +57,6 @@ class ResurrectionReceiver : BroadcastReceiver() {
                     pendingResult.finish()
                 }
             }
-        } else {
-            Log.d(TAG, "Received unexpected action: ${intent.action}")
         }
     }
 }

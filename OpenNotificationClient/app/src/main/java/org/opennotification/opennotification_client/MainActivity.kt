@@ -1,5 +1,11 @@
 package org.opennotification.opennotification_client
 
+import android.annotation.SuppressLint
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -24,6 +30,16 @@ class MainActivity : ComponentActivity() {
     private var showPermissionDialog by mutableStateOf(false)
     private var permissionSummary by mutableStateOf(PermissionManager.PermissionSummary(false, false))
     private var currentScreen by mutableStateOf("main")
+
+    // Broadcast receiver to handle app close signal
+    private val closeAppReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == "org.opennotification.opennotification_client.CLOSE_APP") {
+                android.util.Log.i("MainActivity", "Received close app broadcast - finishing activity")
+                finish()
+            }
+        }
+    }
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -152,7 +168,28 @@ class MainActivity : ComponentActivity() {
             android.util.Log.e("MainActivity", "Error updating permission summary", e)
         }
     }
+
+    // Register the broadcast receiver
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
+    override fun onStart() {
+        super.onStart()
+        val intentFilter = IntentFilter("org.opennotification.opennotification_client.CLOSE_APP")
+
+        // Use RECEIVER_NOT_EXPORTED since this is an internal app broadcast
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(closeAppReceiver, intentFilter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(closeAppReceiver, intentFilter)
+        }
+    }
+
+    // Unregister the broadcast receiver
+    override fun onStop() {
+        super.onStop()
+        try {
+            unregisterReceiver(closeAppReceiver)
+        } catch (e: IllegalArgumentException) {
+            // Receiver was already unregistered, ignore
+        }
+    }
 }
-
-
-

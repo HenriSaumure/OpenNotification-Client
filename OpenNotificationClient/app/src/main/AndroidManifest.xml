@@ -2,69 +2,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Permissions for network access and background service -->
+    <!-- Essential permissions only -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.TURN_SCREEN_ON" />
-
-    <!-- Vibration permission for haptic feedback -->
     <uses-permission android:name="android.permission.VIBRATE" />
-
-    <!-- Battery optimization and background execution -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-
-    <!-- Additional permissions for better background execution -->
-    <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
-    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
-
-    <!-- Lock screen notification permissions -->
-    <uses-permission android:name="android.permission.SHOW_KEYGUARD_MESSAGE"
-        tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.INTERNAL_SYSTEM_WINDOW"
-        tools:ignore="ProtectedPermissions" />
-    <uses-permission android:name="android.permission.SYSTEM_APPLICATION_OVERLAY"
-        tools:ignore="ProtectedPermissions" />
-
-    <!-- Memory pressure resistance permissions -->
-    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
-    <uses-permission android:name="android.permission.GET_TASKS" />
-    <uses-permission android:name="android.permission.REORDER_TASKS" />
-
-    <!-- Prevent the system from stopping the app -->
-    <uses-permission android:name="android.permission.REQUEST_COMPANION_RUN_IN_BACKGROUND" />
-    <uses-permission android:name="android.permission.REQUEST_COMPANION_USE_DATA_IN_BACKGROUND" />
-
-    <!-- Critical permissions for background service reliability -->
-    <uses-permission android:name="android.permission.START_FOREGROUND_SERVICES_FROM_BACKGROUND" />
-    <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE" />
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
-
-    <!-- Auto-start permissions -->
-    <uses-permission android:name="android.permission.QUICKBOOT_POWERON" />
-    <uses-permission android:name="com.miui.securitycenter.permission.AppPermissionsEditor" />
-    <uses-permission android:name="oppo.permission.OPPO_COMPONENT_SAFE" />
-    <uses-permission android:name="com.huawei.permission.external_app_settings.USE_COMPONENT" />
-
-    <!-- Critical: High priority service permissions -->
-    <uses-permission android:name="android.permission.DEVICE_POWER" />
-    <uses-permission android:name="android.permission.MODIFY_PHONE_STATE" />
-
-    <!-- Prevent process death -->
-    <uses-permission android:name="android.permission.PERSISTENT_ACTIVITY" />
-    <uses-permission android:name="android.permission.INTERACT_ACROSS_USERS_FULL" />
-
-    <!-- Lock the app in memory -->
-    <uses-permission android:name="android.permission.SET_PROCESS_LIMIT" />
-    <uses-permission android:name="android.permission.CHANGE_CONFIGURATION" />
 
     <application
         android:allowBackup="true"
@@ -75,9 +23,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.OpenNotificationClient"
-        android:usesCleartextTraffic="true"
-        android:requestLegacyExternalStorage="true"
-        android:persistent="true">
+        android:usesCleartextTraffic="true">
 
         <activity
             android:name=".MainActivity"
@@ -117,25 +63,12 @@
             android:directBootAware="true"
             android:isolatedProcess="false" />
 
-        <!-- Full Screen Overlay Service for system-wide alerts -->
+        <!-- Full Screen Overlay Service -->
         <service
             android:name=".service.FullScreenOverlayService"
             android:enabled="true"
             android:exported="false"
             android:stopWithTask="false" />
-
-        <!-- Watchdog Service - monitors and restarts WebSocket service -->
-        <service
-            android:name=".service.WatchdogService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="specialUse"
-            android:stopWithTask="false"
-            android:directBootAware="true"
-            android:isolatedProcess="false">
-            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="keep_websocket_alive" />
-        </service>
 
         <!-- Boot receiver to start service on device restart -->
         <receiver
@@ -143,13 +76,11 @@
             android:enabled="true"
             android:exported="true"
             android:directBootAware="true">
-            <!-- Boot events intent filter (no data scheme) -->
             <intent-filter android:priority="1000">
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
-            <!-- Package replacement events intent filter (with data scheme) -->
             <intent-filter android:priority="1000">
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.PACKAGE_REPLACED" />

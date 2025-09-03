@@ -15,7 +15,8 @@ import org.opennotification.opennotification_client.network.WebSocketManager
 class ConnectionKeepAlive {
     companion object {
         private const val TAG = "ConnectionKeepAlive"
-        private const val KEEP_ALIVE_INTERVAL = 19995L
+        // Increased from 19995ms to 5 minutes for better battery life
+        private const val KEEP_ALIVE_INTERVAL = 300000L // 5 minutes
         const val ACTION_KEEP_ALIVE = "org.opennotification.opennotification_client.KEEP_ALIVE"
 
         private var isKeepAliveScheduled = false
@@ -46,13 +47,14 @@ class ConnectionKeepAlive {
             val nextWakeTime = System.currentTimeMillis() + KEEP_ALIVE_INTERVAL
 
             try {
-                alarmManager.setExactAndAllowWhileIdle(
+                // Use less aggressive alarm for better battery life
+                alarmManager.setAndAllowWhileIdle(
                     AlarmManager.RTC_WAKEUP,
                     nextWakeTime,
                     pendingIntent
                 )
 
-                Log.d(TAG, "Alarm sleep timer: setting an exact alarm to wake up in ${KEEP_ALIVE_INTERVAL}ms")
+                Log.d(TAG, "Scheduled keep-alive alarm in ${KEEP_ALIVE_INTERVAL}ms")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to schedule keep-alive alarm", e)
             }
@@ -89,13 +91,12 @@ class KeepAliveReceiver : BroadcastReceiver() {
     private fun handleKeepAlive(context: Context) {
         scope.launch {
             try {
-                Log.d(TAG, "Sending keep-alive")
                 val webSocketManager = WebSocketManager.getInstance()
 
-                webSocketManager.sendKeepAlivePings()
-                webSocketManager.retryErrorConnections()
-
+                // Only perform keep-alive if we have active connections
                 if (webSocketManager.hasActiveConnections()) {
+                    Log.d(TAG, "Performing keep-alive check")
+                    webSocketManager.retryErrorConnections()
                     ConnectionKeepAlive.scheduleNextKeepAlive(context)
                 } else {
                     Log.i(TAG, "No active connections - stopping keep-alive timer")
@@ -104,6 +105,7 @@ class KeepAliveReceiver : BroadcastReceiver() {
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error in keep-alive handler", e)
+                // Still reschedule to maintain connection monitoring
                 try {
                     val webSocketManager = WebSocketManager.getInstance()
                     if (webSocketManager.hasActiveConnections()) {
