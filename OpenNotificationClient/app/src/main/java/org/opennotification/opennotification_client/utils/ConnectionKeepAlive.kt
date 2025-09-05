@@ -16,7 +16,7 @@ class ConnectionKeepAlive {
     companion object {
         private const val TAG = "ConnectionKeepAlive"
         // Increased from 19995ms to 5 minutes for better battery life
-        private const val KEEP_ALIVE_INTERVAL = 300000L // 5 minutes
+        private const val KEEP_ALIVE_INTERVAL = 20000L // 20 seconds
         const val ACTION_KEEP_ALIVE = "org.opennotification.opennotification_client.KEEP_ALIVE"
 
         private var isKeepAliveScheduled = false
