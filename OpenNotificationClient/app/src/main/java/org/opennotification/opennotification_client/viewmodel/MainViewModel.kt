@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.opennotification.opennotification_client.data.database.AppDatabase
 import org.opennotification.opennotification_client.data.models.WebSocketListener
@@ -31,10 +32,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
+    // Add a periodic status refresh timer
+    private var statusRefreshJob: kotlinx.coroutines.Job? = null
+
     init {
         Log.i("MainViewModel", "ViewModel initialized with battery optimization")
 
         org.opennotification.opennotification_client.utils.ConnectionKeepAlive.startKeepAlive(getApplication())
+
+        // Start periodic status refresh to ensure UI synchronization
+        startStatusRefresh()
 
         viewModelScope.launch {
             allListeners.collect { listeners ->
@@ -50,6 +57,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    private fun startStatusRefresh() {
+        statusRefreshJob = viewModelScope.launch {
+            while (isActive) {
+                try {
+                    // Force status update every 5 seconds to ensure UI synchronization
+                    webSocketManager.forceStatusUpdate()
+                    kotlinx.coroutines.delay(5000)
+                } catch (e: Exception) {
+                    Log.e("MainViewModel", "Error in status refresh", e)
+                    kotlinx.coroutines.delay(10000) // Wait longer on error
+                }
+            }
+        }
+        Log.d("MainViewModel", "Started periodic status refresh")
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        statusRefreshJob?.cancel()
+        Log.d("MainViewModel", "Stopped periodic status refresh")
     }
 
     fun addListener(name: String, guid: String) {

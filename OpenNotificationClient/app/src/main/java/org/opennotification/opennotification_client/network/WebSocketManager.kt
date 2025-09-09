@@ -85,27 +85,44 @@ class WebSocketManager private constructor() {
         Log.d(TAG, "Connecting to GUID: $guid")
 
         val currentConnection = connections[guid]
-        val isActuallyConnected = currentConnection?.webSocket?.let { ws ->
+
+        // Check if we actually have a healthy connection
+        val isActuallyConnected = currentConnection?.let { connection ->
             try {
-                currentConnection.status == ConnectionStatus.CONNECTED
+                // A connection is only considered healthy if:
+                // 1. It has a WebSocket instance
+                // 2. The status is CONNECTED (not ERROR or DISCONNECTED)
+                // 3. The WebSocket is not closed
+                connection.webSocket != null &&
+                connection.status == ConnectionStatus.CONNECTED &&
+                !isWebSocketClosed(connection.webSocket)
             } catch (e: Exception) {
-                Log.w(TAG, "WebSocket test failed for GUID: $guid", e)
+                Log.w(TAG, "WebSocket health check failed for GUID: $guid", e)
                 false
             }
         } ?: false
 
-        if (isActuallyConnected && currentConnection?.status != ConnectionStatus.ERROR) {
+        if (isActuallyConnected) {
             Log.d(TAG, "Already connected to GUID: $guid")
             return
         }
 
+        // If we have a connection in ERROR or DISCONNECTED state, clean it up first
+        if (currentConnection != null &&
+            (currentConnection.status == ConnectionStatus.ERROR ||
+             currentConnection.status == ConnectionStatus.DISCONNECTED)) {
+            Log.i(TAG, "Cleaning up failed connection for GUID: $guid (status: ${currentConnection.status})")
+            currentConnection.reconnectJob?.cancel()
+            currentConnection.webSocket?.close(1000, "Reconnecting")
+        }
+
         val timeSinceLastAttempt = System.currentTimeMillis() - (currentConnection?.lastReconnectAttempt ?: 0L)
-        if (timeSinceLastAttempt < 2000L) { // Increased prevention threshold for battery
-            Log.d(TAG, "Preventing rapid reconnection for GUID: $guid")
+        if (timeSinceLastAttempt < 2000L) { // Prevent rapid reconnection attempts
+            Log.d(TAG, "Preventing rapid reconnection for GUID: $guid (${timeSinceLastAttempt}ms ago)")
             return
         }
 
-        if (currentConnection?.status == ConnectionStatus.CONNECTING && timeSinceLastAttempt < 60000L) {
+        if (currentConnection?.status == ConnectionStatus.CONNECTING && timeSinceLastAttempt < 30000L) {
             Log.d(TAG, "Connection already in progress for GUID: $guid")
             return
         }
@@ -113,6 +130,22 @@ class WebSocketManager private constructor() {
         connectingGuids.add(guid)
         updateConnectionStatus(guid, ConnectionStatus.CONNECTING)
         attemptConnection(guid, BASE_WS_URL, true)
+    }
+
+    /**
+     * Check if a WebSocket is closed by examining its internal state
+     */
+    private fun isWebSocketClosed(webSocket: WebSocket?): Boolean {
+        return try {
+            webSocket?.let { ws ->
+                // Try to send a small ping - if it fails, the connection is closed
+                // This will return false immediately if the connection is closed
+                !ws.send("")
+            } ?: true
+        } catch (e: Exception) {
+            // If we can't send, the connection is definitely closed
+            true
+        }
     }
 
     /**
@@ -167,58 +200,69 @@ class WebSocketManager private constructor() {
 
             when {
                 connection == null -> {
-                    Log.w(TAG, "No connection found for GUID: $guid")
+                    Log.w(TAG, "No connection found for GUID: $guid - creating new connection")
                     connectToGuid(guid)
                 }
 
-                connection.status == ConnectionStatus.ERROR ||
-                        connection.status == ConnectionStatus.DISCONNECTED -> {
+                connection.status == ConnectionStatus.ERROR -> {
                     val timeSinceLastAttempt = currentTime - connection.lastReconnectAttempt
-
                     if (timeSinceLastAttempt >= RECONNECT_DELAY) {
-                        Log.i(TAG, "Retrying connection for GUID: $guid")
+                        Log.i(TAG, "Retrying ERROR connection for GUID: $guid")
                         connectToGuid(guid)
+                    } else {
+                        Log.d(TAG, "ERROR connection for GUID: $guid will retry in ${RECONNECT_DELAY - timeSinceLastAttempt}ms")
+                    }
+                }
+
+                connection.status == ConnectionStatus.DISCONNECTED -> {
+                    val timeSinceLastAttempt = currentTime - connection.lastReconnectAttempt
+                    if (timeSinceLastAttempt >= RECONNECT_DELAY) {
+                        Log.i(TAG, "Retrying DISCONNECTED connection for GUID: $guid")
+                        connectToGuid(guid)
+                    } else {
+                        Log.d(TAG, "DISCONNECTED connection for GUID: $guid will retry in ${RECONNECT_DELAY - timeSinceLastAttempt}ms")
                     }
                 }
 
                 connection.status == ConnectionStatus.CONNECTING -> {
                     val timeSinceLastAttempt = currentTime - connection.lastReconnectAttempt
-
-                    if (timeSinceLastAttempt > 60000L) { // Increased timeout for battery
-                        Log.w(TAG, "Connection attempt timed out for GUID: $guid")
+                    if (timeSinceLastAttempt > 30000L) { // 30 second timeout for connecting
+                        Log.w(TAG, "Connection attempt timed out for GUID: $guid - retrying")
                         connectToGuid(guid)
+                    }
+                }
+
+                connection.status == ConnectionStatus.CONNECTED -> {
+                    // For CONNECTED connections, verify they're actually healthy
+                    if (connection.webSocket == null || isWebSocketClosed(connection.webSocket)) {
+                        Log.w(TAG, "CONNECTED connection for GUID: $guid is actually closed - reconnecting")
+                        updateConnectionStatus(guid, ConnectionStatus.ERROR)
+                        connectToGuid(guid)
+                    } else {
+                        // Check if we haven't received data in a very long time
+                        val timeSinceLastMessage = currentTime - connection.lastSuccessfulConnection
+                        if (timeSinceLastMessage > 300000L) { // 5 minutes of silence
+                            Log.w(TAG, "No data received for GUID: $guid in ${timeSinceLastMessage}ms - may be stale")
+                            // Don't immediately reconnect, but flag for attention
+                        }
                     }
                 }
             }
         }
 
-        val connectedCount = connections.values.count { it.status == ConnectionStatus.CONNECTED }
-        Log.d(TAG, "Connection monitoring: $connectedCount/${activeListenerGuids.size} connections healthy")
-    }
+        val connectedCount = connections.values.count {
+            it.status == ConnectionStatus.CONNECTED &&
+            it.webSocket != null &&
+            !isWebSocketClosed(it.webSocket)
+        }
+        val errorCount = connections.values.count { it.status == ConnectionStatus.ERROR }
+        val disconnectedCount = connections.values.count { it.status == ConnectionStatus.DISCONNECTED }
+        val connectingCount = connections.values.count { it.status == ConnectionStatus.CONNECTING }
 
-    /**
-     * Verifies if a WebSocket connection is actually healthy
-     */
-    private fun verifyConnectionHealth(guid: String, connection: WebSocketConnection): Boolean {
-        return try {
-            connection.webSocket?.let { ws ->
-                // Check if the connection is still valid without sending data
-                // The automatic ping frames from OkHttpClient will handle actual connectivity testing
-                val timeSinceLastMessage = System.currentTimeMillis() - connection.lastSuccessfulConnection
+        Log.d(TAG, "Connection monitoring: $connectedCount/${activeListenerGuids.size} healthy, $errorCount error, $disconnectedCount disconnected, $connectingCount connecting")
 
-                // If we haven't received any data in over 60 seconds, consider it potentially unhealthy
-                // But don't immediately mark as dead since the server might just be quiet
-                if (timeSinceLastMessage > 60000L) {
-                    Log.d(TAG, "No data received for GUID: $guid in ${timeSinceLastMessage}ms - connection may be idle")
-                    // Let the automatic ping frames handle this rather than sending test messages
-                }
-
-                // Consider connection healthy if it's not obviously broken
-                true
-            } ?: false
-        } catch (e: Exception) {
-            Log.w(TAG, "Health check failed for GUID: $guid", e)
-            false
+        if (connectedCount < activeListenerGuids.size) {
+            Log.i(TAG, "${activeListenerGuids.size - connectedCount} connections need attention")
         }
     }
 
@@ -241,6 +285,10 @@ class WebSocketManager private constructor() {
                     lastSuccessfulConnection = System.currentTimeMillis()
                 )
                 updateConnectionStatus(guid, ConnectionStatus.CONNECTED)
+
+                // Force immediate UI update by emitting current statuses
+                Log.i(TAG, "Connection established for GUID: $guid - updating UI immediately")
+                forceStatusUpdateInternal()
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -307,6 +355,8 @@ class WebSocketManager private constructor() {
                 }
 
                 updateConnectionStatus(guid, ConnectionStatus.ERROR)
+                // Force immediate UI update for error state
+                forceStatusUpdateInternal()
 
                 if (activeListenerGuids.contains(guid)) {
                     scheduleReconnect(guid, "Connection failed")
@@ -324,6 +374,23 @@ class WebSocketManager private constructor() {
             reconnectAttempts = currentConnection?.reconnectAttempts ?: 0,
             lastSuccessfulConnection = currentConnection?.lastSuccessfulConnection ?: 0L
         )
+    }
+
+    /**
+     * Forces an immediate update of the connection status StateFlow
+     * This ensures the UI gets updated immediately when connection states change
+     */
+    private fun forceStatusUpdateInternal() {
+        val currentStatuses = connections.mapValues { it.value.status }.toMutableMap()
+        _connectionStatuses.value = currentStatuses
+        Log.d(TAG, "Forced connection status update: ${currentStatuses.mapValues { it.value.name }}")
+    }
+
+    /**
+     * Public method to force status update - used by MainViewModel for periodic UI sync
+     */
+    fun forceStatusUpdate() {
+        forceStatusUpdateInternal()
     }
 
     fun disconnectFromGuid(guid: String) {
@@ -494,26 +561,37 @@ class WebSocketManager private constructor() {
     fun forceReconnectAll() {
         Log.i(TAG, "Force reconnecting all active connections")
 
-        val activeGuids = connections.keys.toList()
+        val activeGuids = activeListenerGuids.toList()
 
+        // Don't remove statuses immediately - instead mark them as connecting
         activeGuids.forEach { guid ->
             connections[guid]?.let { connection ->
                 connection.reconnectJob?.cancel()
                 connection.webSocket?.close(1000, "Force reconnect")
             }
 
-            connections.remove(guid)
-            connectingGuids.remove(guid)
-
-            val currentStatuses = _connectionStatuses.value.toMutableMap()
-            currentStatuses.remove(guid)
-            _connectionStatuses.value = currentStatuses
+            // Update to CONNECTING status instead of removing
+            connections[guid] = WebSocketConnection(
+                webSocket = null,
+                status = ConnectionStatus.CONNECTING,
+                reconnectJob = null,
+                lastReconnectAttempt = System.currentTimeMillis(),
+                reconnectAttempts = 0,
+                lastSuccessfulConnection = 0L
+            )
+            updateConnectionStatus(guid, ConnectionStatus.CONNECTING)
+            connectingGuids.add(guid)
         }
 
+        // Force immediate UI update to show CONNECTING status
+        forceStatusUpdate()
+
         scope.launch {
-            delay(1000)
+            delay(500) // Shorter delay for better UX
             activeGuids.forEach { guid ->
-                connectToGuid(guid)
+                if (activeListenerGuids.contains(guid)) {
+                    connectToGuid(guid)
+                }
             }
         }
     }

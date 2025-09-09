@@ -93,10 +93,28 @@ class KeepAliveReceiver : BroadcastReceiver() {
             try {
                 val webSocketManager = WebSocketManager.getInstance()
 
+                // Always check and retry error connections first
+                Log.d(TAG, "Checking for error connections to retry")
+                webSocketManager.retryErrorConnections()
+
                 // Only perform keep-alive if we have active connections
                 if (webSocketManager.hasActiveConnections()) {
                     Log.d(TAG, "Performing keep-alive check")
-                    webSocketManager.retryErrorConnections()
+
+                    // Get connection status details for logging
+                    val allStatuses = webSocketManager.getAllConnectionStatuses()
+                    val connectedCount = allStatuses.values.count { it == org.opennotification.opennotification_client.data.models.ConnectionStatus.CONNECTED }
+                    val errorCount = allStatuses.values.count { it == org.opennotification.opennotification_client.data.models.ConnectionStatus.ERROR }
+                    val disconnectedCount = allStatuses.values.count { it == org.opennotification.opennotification_client.data.models.ConnectionStatus.DISCONNECTED }
+
+                    Log.i(TAG, "Keep-alive status: $connectedCount connected, $errorCount error, $disconnectedCount disconnected")
+
+                    // If we have error or disconnected connections, force a retry
+                    if (errorCount > 0 || disconnectedCount > 0) {
+                        Log.i(TAG, "Found ${errorCount + disconnectedCount} failed connections - forcing reconnection attempts")
+                        webSocketManager.retryErrorConnections()
+                    }
+
                     ConnectionKeepAlive.scheduleNextKeepAlive(context)
                 } else {
                     Log.i(TAG, "No active connections - stopping keep-alive timer")

@@ -43,7 +43,8 @@ fun ListenerItem(
     val clipboardManager = LocalClipboardManager.current
     val hapticFeedback = LocalHapticFeedback.current
 
-    val currentConnectionStatus by remember(connectionStatus) { mutableStateOf(connectionStatus) }
+    // Remove the remember wrapper - use connectionStatus directly for real-time updates
+    val currentConnectionStatus = connectionStatus
 
     val shortGuid = listener.guid.takeLast(5)
     val displayGuid = if (showFullGuid) listener.guid else shortGuid

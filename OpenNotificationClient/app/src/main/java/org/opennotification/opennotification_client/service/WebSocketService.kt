@@ -35,18 +35,46 @@ class WebSocketService : Service() {
         private const val ACTION_SHUTDOWN = "org.opennotification.opennotification_client.ACTION_SHUTDOWN"
         private const val BACKGROUND_TEXT = "Running in background"
 
+        // Track foreground service state
+        @Volatile
+        private var isForegroundServiceActive = false
+        @Volatile
+        private var foregroundServiceFailureCount = 0
+        private const val MAX_FOREGROUND_FAILURES = 3
+
         fun startService(context: Context) {
             val intent = Intent(context, WebSocketService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    // Try foreground service first, but handle failures gracefully
+                    if (foregroundServiceFailureCount < MAX_FOREGROUND_FAILURES) {
+                        try {
+                            context.startForegroundService(intent)
+                            Log.d(TAG, "Started foreground service successfully")
+                            return
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Foreground service failed, trying regular service", e)
+                            foregroundServiceFailureCount++
+                        }
+                    }
+
+                    // Fallback to regular service if foreground service fails
+                    Log.i(TAG, "Using regular service due to foreground service restrictions")
+                    context.startService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start WebSocket service", e)
+                throw e
             }
         }
 
         fun stopService(context: Context) {
             val intent = Intent(context, WebSocketService::class.java)
             context.stopService(intent)
+            isForegroundServiceActive = false
         }
     }
 
@@ -57,6 +85,7 @@ class WebSocketService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var isStoppingSelf = false
     private var isDeviceUnlocked = false
+    private var runningAsForeground = false
 
     // Broadcast receiver to detect when device is unlocked
     private val unlockReceiver = object : BroadcastReceiver() {
@@ -82,9 +111,21 @@ class WebSocketService : Service() {
         WebSocketManager.initializeWithContext(this)
         webSocketManager = WebSocketManager.getInstance()
 
-        // Create notification channel and start foreground
+        // Create notification channel first
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, createServiceNotification())
+
+        // Try to start as foreground service, with graceful fallback
+        if (!tryStartForegroundService()) {
+            Log.w(TAG, "Running as background service due to foreground service restrictions")
+            // Still create a notification for background operation
+            try {
+                val notification = createServiceNotification()
+                notificationManager.notify(NOTIFICATION_ID, notification)
+                Log.d(TAG, "Posted background service notification")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to post background notification", e)
+            }
+        }
 
         if (isDeviceUnlocked) {
             // Device is already unlocked, initialize database components immediately
@@ -95,7 +136,65 @@ class WebSocketService : Service() {
             registerUnlockReceiver()
         }
 
-        Log.i(TAG, "WebSocketService started as foreground service")
+        Log.i(TAG, "WebSocketService started (foreground: $runningAsForeground)")
+    }
+
+    /**
+     * Attempts to start the service in foreground mode with proper exception handling
+     * @return true if successful, false if we should run as background service
+     */
+    private fun tryStartForegroundService(): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // Android 10+ has stricter foreground service requirements
+                val notification = createServiceNotification()
+                startForeground(NOTIFICATION_ID, notification)
+                runningAsForeground = true
+                isForegroundServiceActive = true
+                Log.i(TAG, "Successfully started as foreground service")
+                true
+            } else {
+                // Pre-Android 10, foreground services are less restricted
+                val notification = createServiceNotification()
+                startForeground(NOTIFICATION_ID, notification)
+                runningAsForeground = true
+                isForegroundServiceActive = true
+                Log.i(TAG, "Started as foreground service (legacy)")
+                true
+            }
+        } catch (e: Exception) {
+            when {
+                e.message?.contains("ForegroundServiceStartNotAllowedException") == true ||
+                e.message?.contains("Time limit already exhausted") == true -> {
+                    Log.w(TAG, "Foreground service time limit exhausted - running as background service")
+                    foregroundServiceFailureCount++
+                    // Schedule WorkManager fallback when foreground service fails
+                    scheduleWorkerFallback()
+                }
+                e.message?.contains("startForeground") == true -> {
+                    Log.w(TAG, "Foreground service start failed - running as background service", e)
+                    foregroundServiceFailureCount++
+                    scheduleWorkerFallback()
+                }
+                else -> {
+                    Log.e(TAG, "Unexpected error starting foreground service", e)
+                    foregroundServiceFailureCount++
+                    scheduleWorkerFallback()
+                }
+            }
+            runningAsForeground = false
+            isForegroundServiceActive = false
+            false
+        }
+    }
+
+    private fun scheduleWorkerFallback() {
+        try {
+            Log.i(TAG, "Scheduling WorkManager fallback for connection monitoring")
+            org.opennotification.opennotification_client.workers.ConnectionWorker.scheduleWork(applicationContext)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to schedule WorkManager fallback", e)
+        }
     }
 
     private fun isDeviceUnlocked(): Boolean {
