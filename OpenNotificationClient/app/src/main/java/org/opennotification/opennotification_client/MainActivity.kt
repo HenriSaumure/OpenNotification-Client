@@ -21,15 +21,19 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.opennotification.opennotification_client.ui.screens.MainScreen
 import org.opennotification.opennotification_client.ui.screens.SettingsScreen
+import org.opennotification.opennotification_client.ui.screens.NotificationHistoryScreen
+import org.opennotification.opennotification_client.ui.screens.NotificationDetailScreen
 import org.opennotification.opennotification_client.ui.theme.OpenNotificationClientTheme
 import org.opennotification.opennotification_client.ui.components.PermissionDialog
 import org.opennotification.opennotification_client.utils.PermissionManager
+import org.opennotification.opennotification_client.data.models.Notification
 
 class MainActivity : ComponentActivity() {
     private lateinit var permissionManager: PermissionManager
     private var showPermissionDialog by mutableStateOf(false)
     private var permissionSummary by mutableStateOf(PermissionManager.PermissionSummary(false, false))
     private var currentScreen by mutableStateOf("main")
+    private var selectedNotification by mutableStateOf<Notification?>(null)
 
     // Broadcast receiver to handle app close signal
     private val closeAppReceiver = object : BroadcastReceiver() {
@@ -85,11 +89,25 @@ class MainActivity : ComponentActivity() {
                 ) {
                     when (currentScreen) {
                         "main" -> MainScreen(
-                            onNavigateToSettings = { currentScreen = "settings" }
+                            onNavigateToSettings = { currentScreen = "settings" },
+                            onNavigateToNotificationHistory = { currentScreen = "notification_history" }
                         )
                         "settings" -> SettingsScreen(
                             onBackClick = { currentScreen = "main" }
                         )
+                        "notification_history" -> NotificationHistoryScreen(
+                            onBackClick = { currentScreen = "main" },
+                            onNavigateToDetail = { notification ->
+                                selectedNotification = notification
+                                currentScreen = "notification_detail"
+                            }
+                        )
+                        "notification_detail" -> selectedNotification?.let { notification ->
+                            NotificationDetailScreen(
+                                notification = notification,
+                                onBackClick = { currentScreen = "notification_history" }
+                            )
+                        }
                     }
                     if (showPermissionDialog && currentScreen == "main") {
                         PermissionDialog(

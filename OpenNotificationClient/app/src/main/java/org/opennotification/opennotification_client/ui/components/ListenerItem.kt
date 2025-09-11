@@ -33,7 +33,9 @@ fun ListenerItem(
     connectionStatus: ConnectionStatus?,
     onToggleStatus: () -> Unit,
     onDelete: () -> Unit,
-    onRename: ((String) -> Unit)? = null
+    onRename: ((String) -> Unit)? = null,
+    sequentialCurrentGuid: String? = null,
+    sequentialWaitingGuids: Set<String> = emptySet()
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -48,6 +50,24 @@ fun ListenerItem(
 
     val shortGuid = listener.guid.takeLast(5)
     val displayGuid = if (showFullGuid) listener.guid else shortGuid
+
+    // Déterminer si cette connexion est en attente dans la reconnexion séquentielle
+    val isWaiting = listener.isActive && sequentialWaitingGuids.contains(listener.guid)
+    val isCurrentlyConnecting = listener.isActive && sequentialCurrentGuid == listener.guid &&
+                               currentConnectionStatus != ConnectionStatus.CONNECTED // Ne pas considérer comme "en cours" si déjà connecté
+
+    // Afficher le statut approprié
+    val statusText = when {
+        isWaiting -> "Waiting..."
+        isCurrentlyConnecting && currentConnectionStatus == ConnectionStatus.CONNECTING -> "Connecting..."
+        else -> getConnectionStatusText(currentConnectionStatus, listener.isActive)
+    }
+
+    val statusColor = when {
+        isWaiting -> MaterialTheme.colorScheme.outline
+        isCurrentlyConnecting && currentConnectionStatus != ConnectionStatus.CONNECTED -> Color(0xFFFF9800) // Orange uniquement si en cours de connexion
+        else -> getConnectionStatusColor(currentConnectionStatus, listener.isActive)
+    }
 
     Card(
         modifier = Modifier
@@ -106,13 +126,14 @@ fun ListenerItem(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     ConnectionStatusIndicator(
-                        connectionStatus = currentConnectionStatus,
-                        isActive = listener.isActive
+                        connectionStatus = if (isWaiting) null else currentConnectionStatus,
+                        isActive = listener.isActive,
+                        isWaiting = isWaiting
                     )
                     Text(
-                        text = getConnectionStatusText(currentConnectionStatus, listener.isActive),
+                        text = statusText,
                         style = MaterialTheme.typography.bodySmall,
-                        color = getConnectionStatusColor(currentConnectionStatus, listener.isActive),
+                        color = statusColor,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -242,9 +263,14 @@ private fun formatTimestamp(timestamp: Long): String {
 @Composable
 private fun ConnectionStatusIndicator(
     connectionStatus: ConnectionStatus?,
-    isActive: Boolean
+    isActive: Boolean,
+    isWaiting: Boolean = false
 ) {
-    val color = getConnectionStatusColor(connectionStatus, isActive)
+    val color = if (isWaiting) {
+        MaterialTheme.colorScheme.outline
+    } else {
+        getConnectionStatusColor(connectionStatus, isActive)
+    }
 
     Box(
         modifier = Modifier
@@ -264,7 +290,7 @@ private fun getConnectionStatusColor(
         when (connectionStatus) {
             ConnectionStatus.CONNECTED -> Color(0xFF4CAF50)
             ConnectionStatus.CONNECTING -> Color(0xFFFF9800)
-            ConnectionStatus.ERROR -> Color(0xFFF44336)
+            ConnectionStatus.ERROR -> Color(0xFFE53935) // Rouge pour les erreurs
             ConnectionStatus.DISCONNECTED, null -> Color(0xFF9E9E9E)
         }
     }
@@ -281,7 +307,8 @@ private fun getConnectionStatusText(
             ConnectionStatus.CONNECTED -> "Connected"
             ConnectionStatus.CONNECTING -> "Connecting..."
             ConnectionStatus.ERROR -> "Connection Error"
-            ConnectionStatus.DISCONNECTED, null -> "Disconnected"
+            ConnectionStatus.DISCONNECTED -> "Disconnected"
+            null -> TODO()
         }
     }
 }

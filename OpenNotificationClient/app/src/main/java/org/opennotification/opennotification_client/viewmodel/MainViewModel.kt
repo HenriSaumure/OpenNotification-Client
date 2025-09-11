@@ -26,6 +26,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val allNotifications = repository.getAllNotifications()
     val connectionStatuses = webSocketManager.connectionStatuses
 
+    // StateFlows pour la reconnexion séquentielle
+    val sequentialCurrentGuid = webSocketManager.sequentialCurrentGuid
+    val sequentialWaitingGuids = webSocketManager.sequentialWaitingGuids
+
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 

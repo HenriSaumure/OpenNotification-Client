@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
@@ -21,12 +22,17 @@ import org.opennotification.opennotification_client.viewmodel.MainViewModel
 @Composable
 fun MainScreen(
     onNavigateToSettings: () -> Unit = {},
+    onNavigateToNotificationHistory: () -> Unit = {},
     viewModel: MainViewModel = viewModel()
 ) {
     val listeners by viewModel.allListeners.collectAsState(initial = emptyList())
     val connectionStatuses by viewModel.connectionStatuses.collectAsState(initial = emptyMap())
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
+    
+    // Collecte des états de reconnexion séquentielle
+    val sequentialCurrentGuid by viewModel.sequentialCurrentGuid.collectAsState(initial = null)
+    val sequentialWaitingGuids by viewModel.sequentialWaitingGuids.collectAsState(initial = emptySet())
 
     var showAddDialog by remember { mutableStateOf(false) }
 
@@ -35,6 +41,13 @@ fun MainScreen(
             TopAppBar(
                 title = { Text("Connections") },
                 actions = {
+                    IconButton(onClick = onNavigateToNotificationHistory) {
+                        Icon(
+                            imageVector = Icons.Default.Notifications,
+                            contentDescription = "Notification History",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
                     IconButton(onClick = onNavigateToSettings) {
                         Icon(
                             imageVector = Icons.Default.Settings,
@@ -100,6 +113,7 @@ fun MainScreen(
                 modifier = Modifier.fillMaxSize()
             ) {
                 if (listeners.isEmpty() && !isLoading) {
+                    // Afficher le message uniquement si la liste est vide ET qu'on n'est pas en train de charger
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
@@ -127,6 +141,7 @@ fun MainScreen(
                         }
                     }
                 } else {
+                    // Toujours afficher la LazyColumn, même si elle est vide pendant le chargement
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(16.dp),
@@ -141,7 +156,9 @@ fun MainScreen(
                                 connectionStatus = connectionStatuses[listener.guid],
                                 onToggleStatus = { viewModel.toggleListenerStatus(listener) },
                                 onDelete = { viewModel.deleteListener(listener) },
-                                onRename = { newName -> viewModel.renameListener(listener, newName) }
+                                onRename = { newName -> viewModel.renameListener(listener, newName) },
+                                sequentialCurrentGuid = sequentialCurrentGuid,
+                                sequentialWaitingGuids = sequentialWaitingGuids
                             )
                         }
                     }

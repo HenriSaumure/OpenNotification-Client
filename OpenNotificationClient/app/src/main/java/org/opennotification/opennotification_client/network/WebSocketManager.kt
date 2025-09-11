@@ -71,6 +71,13 @@ class WebSocketManager private constructor() {
     private val activeListenerGuids = ConcurrentHashMap.newKeySet<String>()
     private var connectionMonitorJob: Job? = null
     private var isMonitoringActive = false
+    private var isSequentialReconnectInProgress = false
+
+    // StateFlows pour l'UI de reconnexion séquentielle
+    private val _sequentialCurrentGuid = MutableStateFlow<String?>(null)
+    val sequentialCurrentGuid: StateFlow<String?> = _sequentialCurrentGuid
+    private val _sequentialWaitingGuids = MutableStateFlow<Set<String>>(emptySet())
+    val sequentialWaitingGuids: StateFlow<Set<String>> = _sequentialWaitingGuids
 
     data class WebSocketConnection(
         val webSocket: WebSocket?,
@@ -424,6 +431,12 @@ class WebSocketManager private constructor() {
         if (!activeListenerGuids.contains(guid)) {
             return
         }
+        
+        // Bloquer les reconnexions automatiques pendant la reconnexion séquentielle
+        if (isSequentialReconnectInProgress) {
+            Log.i(TAG, "Sequential reconnect in progress - skipping scheduled reconnect for GUID: $guid ($reason)")
+            return
+        }
 
         val currentConnection = connections[guid]
         val attempts = (currentConnection?.reconnectAttempts ?: 0) + 1
@@ -432,11 +445,10 @@ class WebSocketManager private constructor() {
 
         val reconnectJob = scope.launch {
             delay(delay)
-            if (activeListenerGuids.contains(guid)) {
+            if (activeListenerGuids.contains(guid) && !isSequentialReconnectInProgress) {
                 connectToGuid(guid)
             }
         }
-
         connections[guid] = connections[guid]?.copy(
             reconnectJob = reconnectJob,
             lastReconnectAttempt = System.currentTimeMillis(),
@@ -448,6 +460,177 @@ class WebSocketManager private constructor() {
             lastReconnectAttempt = System.currentTimeMillis(),
             reconnectAttempts = attempts
         )
+    }
+
+    /**
+     * Forces une reconnexion immédiate de tous les GUIDs actifs, en séquence.
+     * Cette méthode bloque les reconnexions automatiques et attend que chaque connexion soit établie ou échoue.
+     */
+    fun forceReconnectAll() {
+        Log.i(TAG, "Force reconnecting all active connections")
+
+        val activeGuids = activeListenerGuids.toList()
+        if (activeGuids.isEmpty()) {
+            Log.d(TAG, "No active connections to reconnect")
+            return
+        }
+
+        // Bloquer les reconnexions automatiques
+        isSequentialReconnectInProgress = true
+        
+        // Arrêter le monitoring pour éviter les interférences
+        stopConnectionMonitoring()
+
+        // Préparer tous les GUIDs : annuler les jobs et fermer les connexions
+        activeGuids.forEach { guid ->
+            connections[guid]?.let { connection ->
+                connection.reconnectJob?.cancel()
+                connection.webSocket?.close(1000, "Force reconnect")
+            }
+
+            // Marquer comme CONNECTING avec lastReconnectAttempt = 0 pour éviter les blocages
+            connections[guid] = WebSocketConnection(
+                webSocket = null,
+                status = ConnectionStatus.CONNECTING,
+                reconnectJob = null,
+                lastReconnectAttempt = 0L, // Important : pas de blocage
+                reconnectAttempts = 0,
+                lastSuccessfulConnection = 0L
+            )
+            updateConnectionStatus(guid, ConnectionStatus.CONNECTING)
+            connectingGuids.add(guid)
+        }
+
+        // Initialiser l'état UI séquentiel
+        _sequentialCurrentGuid.value = null
+        _sequentialWaitingGuids.value = activeGuids.toSet()
+        
+        // Force immediate UI update to show CONNECTING status
+        forceStatusUpdate()
+
+        // Vraie reconnexion séquentielle
+        scope.launch {
+            try {
+                delay(500) // Initial delay for better UX
+                
+                activeGuids.forEachIndexed { index, guid ->
+                    if (!activeListenerGuids.contains(guid)) {
+                        Log.d(TAG, "Skipping GUID $guid as it's no longer active")
+                        return@forEachIndexed
+                    }
+
+                    // Mettre à jour l'état UI
+                    _sequentialCurrentGuid.value = guid
+                    _sequentialWaitingGuids.value = activeGuids.drop(index + 1).toSet()
+
+                    // Log des autres en attente
+                    activeGuids.forEachIndexed { i, other ->
+                        if (i > index) {
+                            Log.d(TAG, "GUID $other waiting (${i + 1}/${activeGuids.size})")
+                        }
+                    }
+
+                    Log.d(TAG, "Reconnecting GUID $guid (${index + 1}/${activeGuids.size}) - others waiting")
+
+                    // S'assurer que le GUID est prêt pour la connexion
+                    connections[guid] = connections[guid]?.copy(
+                        status = ConnectionStatus.CONNECTING,
+                        lastReconnectAttempt = 0L // Pas de blocage
+                    ) ?: WebSocketConnection(
+                        webSocket = null,
+                        status = ConnectionStatus.CONNECTING,
+                        reconnectJob = null,
+                        lastReconnectAttempt = 0L,
+                        reconnectAttempts = 0,
+                        lastSuccessfulConnection = 0L
+                    )
+                    updateConnectionStatus(guid, ConnectionStatus.CONNECTING)
+                    connectingGuids.add(guid)
+
+                    // Lancer la connexion
+                    connectToGuid(guid)
+
+                    // Attendre que cette connexion soit établie ou échoue
+                    var waitedMs = 0L
+                    val stepMs = 500L
+                    val timeoutMs = 20000L // 20 secondes timeout
+                    
+                    while (waitedMs < timeoutMs) {
+                        val currentStatus = connections[guid]?.status
+                        
+                        if (currentStatus == ConnectionStatus.CONNECTED) {
+                            Log.d(TAG, "GUID $guid connected successfully (${index + 1}/${activeGuids.size})")
+                            break
+                        } else if (currentStatus == ConnectionStatus.ERROR || currentStatus == ConnectionStatus.DISCONNECTED) {
+                            Log.d(TAG, "GUID $guid connection failed with status: $currentStatus (${index + 1}/${activeGuids.size})")
+                            break
+                        }
+                        
+                        delay(stepMs)
+                        waitedMs += stepMs
+                        
+                        // Log de progression toutes les 5 secondes
+                        if (waitedMs % 5000L == 0L) {
+                            Log.d(TAG, "Still waiting for GUID $guid connection (${waitedMs}ms)...")
+                        }
+                    }
+                    
+                    if (waitedMs >= timeoutMs) {
+                        Log.w(TAG, "Connection timeout for GUID $guid - moving to next")
+                    }
+
+                    // Petit délai entre les connexions pour la stabilité
+                    delay(1000)
+                }
+            } finally {
+                // Nettoyer l'état séquentiel
+                _sequentialCurrentGuid.value = null
+                _sequentialWaitingGuids.value = emptySet()
+                
+                // Réactiver les reconnexions automatiques
+                isSequentialReconnectInProgress = false
+                
+                // Redémarrer le monitoring
+                startConnectionMonitoring()
+                
+                Log.i(TAG, "True sequential reconnection of ${activeGuids.size} connections completed")
+                forceStatusUpdate()
+            }
+        }
+    }
+
+    private fun loadServerUrlFromPreferences(context: Context) {
+        try {
+            // Check if device is unlocked before accessing encrypted storage
+            if (!isDeviceUnlocked(context)) {
+                Log.d(TAG, "Device not yet unlocked - using default server URL")
+                return
+            }
+
+            val sharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val savedUrl = sharedPreferences.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL) ?: DEFAULT_SERVER_URL
+
+            if (savedUrl != DEFAULT_SERVER_URL) {
+                BASE_WS_URL = if (savedUrl.endsWith("/ws")) {
+                    savedUrl
+                } else {
+                    "$savedUrl/ws"
+                }
+                Log.i(TAG, "Loaded server URL from preferences: $BASE_WS_URL")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error loading server URL from preferences - using default", e)
+            // Use default URL if preferences can't be accessed
+        }
+    }
+
+    private fun isDeviceUnlocked(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val userManager = context.getSystemService(Context.USER_SERVICE) as UserManager
+            userManager.isUserUnlocked
+        } else {
+            true
+        }
     }
 
     private fun updateConnectionStatus(guid: String, status: ConnectionStatus) {
@@ -556,77 +739,5 @@ class WebSocketManager private constructor() {
 
     fun getErrorConnections(): List<String> {
         return connections.filterValues { it.status == ConnectionStatus.ERROR }.keys.toList()
-    }
-
-    fun forceReconnectAll() {
-        Log.i(TAG, "Force reconnecting all active connections")
-
-        val activeGuids = activeListenerGuids.toList()
-
-        // Don't remove statuses immediately - instead mark them as connecting
-        activeGuids.forEach { guid ->
-            connections[guid]?.let { connection ->
-                connection.reconnectJob?.cancel()
-                connection.webSocket?.close(1000, "Force reconnect")
-            }
-
-            // Update to CONNECTING status instead of removing
-            connections[guid] = WebSocketConnection(
-                webSocket = null,
-                status = ConnectionStatus.CONNECTING,
-                reconnectJob = null,
-                lastReconnectAttempt = System.currentTimeMillis(),
-                reconnectAttempts = 0,
-                lastSuccessfulConnection = 0L
-            )
-            updateConnectionStatus(guid, ConnectionStatus.CONNECTING)
-            connectingGuids.add(guid)
-        }
-
-        // Force immediate UI update to show CONNECTING status
-        forceStatusUpdate()
-
-        scope.launch {
-            delay(500) // Shorter delay for better UX
-            activeGuids.forEach { guid ->
-                if (activeListenerGuids.contains(guid)) {
-                    connectToGuid(guid)
-                }
-            }
-        }
-    }
-
-    private fun loadServerUrlFromPreferences(context: Context) {
-        try {
-            // Check if device is unlocked before accessing encrypted storage
-            if (!isDeviceUnlocked(context)) {
-                Log.d(TAG, "Device not yet unlocked - using default server URL")
-                return
-            }
-
-            val sharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val savedUrl = sharedPreferences.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL) ?: DEFAULT_SERVER_URL
-
-            if (savedUrl != DEFAULT_SERVER_URL) {
-                BASE_WS_URL = if (savedUrl.endsWith("/ws")) {
-                    savedUrl
-                } else {
-                    "$savedUrl/ws"
-                }
-                Log.i(TAG, "Loaded server URL from preferences: $BASE_WS_URL")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error loading server URL from preferences - using default", e)
-            // Use default URL if preferences can't be accessed
-        }
-    }
-
-    private fun isDeviceUnlocked(context: Context): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            val userManager = context.getSystemService(Context.USER_SERVICE) as UserManager
-            userManager.isUserUnlocked
-        } else {
-            true
-        }
     }
 }
