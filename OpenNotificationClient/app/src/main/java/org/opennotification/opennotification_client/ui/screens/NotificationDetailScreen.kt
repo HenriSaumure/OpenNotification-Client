@@ -13,7 +13,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Launch
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,6 +39,12 @@ fun NotificationDetailScreen(
     val dateFormat = SimpleDateFormat("MM/dd/yyyy HH:mm:ss", Locale.getDefault())
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+
+    // History preference state
+    val prefs by remember { mutableStateOf(context.getSharedPreferences("opennotification_settings", android.content.Context.MODE_PRIVATE)) }
+    var isHistoryEnabled by remember {
+        mutableStateOf(prefs.getBoolean("history_enabled", true))
+    }
 
     Scaffold(
         topBar = {
@@ -139,6 +145,8 @@ fun NotificationDetailScreen(
             
             Divider(modifier = Modifier.padding(bottom = 12.dp))
             
+
+
             // WebSocket Source
             InfoSection(
                 title = "Source",

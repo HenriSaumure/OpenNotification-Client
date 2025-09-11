@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
 import org.opennotification.opennotification_client.ui.components.AddListenerDialog
 import org.opennotification.opennotification_client.ui.components.ListenerItem
 import org.opennotification.opennotification_client.viewmodel.MainViewModel
@@ -33,6 +34,15 @@ fun MainScreen(
     // Collecte des états de reconnexion séquentielle
     val sequentialCurrentGuid by viewModel.sequentialCurrentGuid.collectAsState(initial = null)
     val sequentialWaitingGuids by viewModel.sequentialWaitingGuids.collectAsState(initial = emptySet())
+
+    // État de chargement initial pour éviter l'affichage prématuré du texte "pas de listeners"
+    var isInitialLoading by remember { mutableStateOf(true) }
+
+    // Gérer l'état de chargement initial
+    LaunchedEffect(Unit) {
+        delay(300)
+        isInitialLoading = false
+    }
 
     var showAddDialog by remember { mutableStateOf(false) }
 
@@ -112,8 +122,7 @@ fun MainScreen(
                 onRefresh = { viewModel.refreshConnections() },
                 modifier = Modifier.fillMaxSize()
             ) {
-                if (listeners.isEmpty() && !isLoading) {
-                    // Afficher le message uniquement si la liste est vide ET qu'on n'est pas en train de charger
+                if (listeners.isEmpty() && !isLoading && !isInitialLoading) {
                     Box(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center
@@ -141,7 +150,6 @@ fun MainScreen(
                         }
                     }
                 } else {
-                    // Toujours afficher la LazyColumn, même si elle est vide pendant le chargement
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(16.dp),

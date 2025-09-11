@@ -34,6 +34,9 @@ class WebSocketService : Service() {
         private const val CHANNEL_NAME = "Background service"
         private const val ACTION_SHUTDOWN = "org.opennotification.opennotification_client.ACTION_SHUTDOWN"
         private const val BACKGROUND_TEXT = "Running in background"
+        // Preference key to control history persistence
+        private const val PREFS_NAME = "opennotification_settings"
+        private const val KEY_HISTORY_ENABLED = "history_enabled"
 
         // Track foreground service state
         @Volatile
@@ -569,8 +572,21 @@ class WebSocketService : Service() {
                 try {
                     Log.i(TAG, "Received WebSocket notification: ${incomingNotification.title}")
 
-                    repository?.insertNotification(incomingNotification)
+                    // Read current preference for history
+                    val prefs = applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    val isHistoryEnabled = prefs.getBoolean(KEY_HISTORY_ENABLED, true)
+
+                    // Always show the OS notification
                     notificationDisplayManager?.showNotification(incomingNotification)
+
+                    if (isHistoryEnabled) {
+                        // Persist notification in history
+                        repository?.insertNotification(incomingNotification)
+                        Log.i(TAG, "Notification persisted to history: ${incomingNotification.id}")
+                    } else {
+                        // History disabled: do not persist. This makes notifications ephemeral
+                        Log.i(TAG, "History disabled - skipping persistence for: ${incomingNotification.id}")
+                    }
 
                     Log.i(TAG, "Processed incoming notification: ${incomingNotification.title}")
                 } catch (e: Exception) {
