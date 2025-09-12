@@ -29,7 +29,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.OpenNotificationClient"
+            android:theme="@style/Theme.OpenNotificationClient.BlackBackground"
             android:launchMode="singleTop"
             android:screenOrientation="portrait"
             android:excludeFromRecents="false">

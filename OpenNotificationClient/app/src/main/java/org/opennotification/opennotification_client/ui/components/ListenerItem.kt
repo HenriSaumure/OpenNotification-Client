@@ -308,7 +308,7 @@ private fun getConnectionStatusText(
             ConnectionStatus.CONNECTING -> "Connecting..."
             ConnectionStatus.ERROR -> "Connection Error"
             ConnectionStatus.DISCONNECTED -> "Disconnected"
-            null -> TODO()
+            null -> "Unknown Status"
         }
     }
 }

@@ -3,6 +3,13 @@
 
     <style name="Theme.OpenNotificationClient" parent="android:Theme.Material.Light.NoActionBar" />
 
+    <!-- Simple black background theme for app startup -->
+    <style name="Theme.OpenNotificationClient.BlackBackground" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+    </style>
+
     <style name="FullScreenAlertTheme" parent="android:Theme.Black.NoTitleBar.Fullscreen">
         <item name="android:windowIsTranslucent">false</item>
         <item name="android:windowBackground">@android:color/black</item>

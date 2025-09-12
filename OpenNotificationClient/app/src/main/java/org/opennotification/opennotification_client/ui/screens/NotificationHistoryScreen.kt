@@ -1,9 +1,11 @@
 package org.opennotification.opennotification_client.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -21,7 +23,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.Canvas
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,6 +56,11 @@ fun NotificationHistoryScreen(
         mutableStateOf(prefs.getBoolean("history_enabled", true))
     }
 
+    // Handle back button press
+    BackHandler {
+        onBackClick()
+    }
+
     // État de chargement initial pour éviter l'affichage prématuré du texte "pas de notifications"
     var isInitialLoading by remember { mutableStateOf(true) }
 
@@ -75,7 +86,7 @@ fun NotificationHistoryScreen(
                     }
                 },
                 actions = {
-                    // History toggle button with enhanced visual feedback
+                    // History toggle button with slash indicator when disabled
                     IconButton(
                         onClick = {
                             val newValue = !isHistoryEnabled
@@ -83,28 +94,29 @@ fun NotificationHistoryScreen(
                             prefs.edit().putBoolean("history_enabled", newValue).apply()
                         }
                     ) {
-                        // Enhanced visual feedback with background and better colors
                         Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .background(
-                                    color = if (isHistoryEnabled)
-                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                                    else
-                                        MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
-                                    shape = androidx.compose.foundation.shape.CircleShape
-                                ),
+                            modifier = Modifier.size(24.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                imageVector = if (isHistoryEnabled) Icons.Filled.History else Icons.Outlined.History,
+                                imageVector = Icons.Filled.History,
                                 contentDescription = if (isHistoryEnabled) "History enabled - Click to disable" else "History disabled - Click to enable",
-                                tint = if (isHistoryEnabled)
-                                    MaterialTheme.colorScheme.primary
-                                else
-                                    MaterialTheme.colorScheme.error,
+                                tint = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.size(24.dp)
                             )
+
+                            // Add diagonal slash when history is disabled
+                            if (!isHistoryEnabled) {
+                                val onSurfaceColor = MaterialTheme.colorScheme.onSurface
+                                Canvas(modifier = Modifier.size(24.dp)) {
+                                    drawLine(
+                                        color = onSurfaceColor,
+                                        start = Offset(6f, 6f),
+                                        end = Offset(size.width - 6f, size.height - 6f),
+                                        strokeWidth = 6f
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -164,7 +176,7 @@ fun NotificationHistoryScreen(
                 }
             }
         }
-        
+
         if (showDeleteConfirmDialog) {
             AlertDialog(
                 onDismissRequest = { showDeleteConfirmDialog = false },
@@ -319,14 +331,14 @@ fun NotificationItem(
             }
             
             Spacer(modifier = Modifier.height(4.dp))
-            
+
             notification.description?.let { description ->
                 Text(
                     text = description,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = if (notification.isAlert) 
-                        MaterialTheme.colorScheme.onErrorContainer 
-                    else 
+                    color = if (notification.isAlert)
+                        MaterialTheme.colorScheme.onErrorContainer
+                    else
                         MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis

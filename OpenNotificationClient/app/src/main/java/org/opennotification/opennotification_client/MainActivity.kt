@@ -11,6 +11,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -34,6 +36,10 @@ class MainActivity : ComponentActivity() {
     private var permissionSummary by mutableStateOf(PermissionManager.PermissionSummary(false, false))
     private var currentScreen by mutableStateOf("main")
     private var selectedNotification by mutableStateOf<Notification?>(null)
+
+    // Navigation history and direction tracking
+    private var navigationStack by mutableStateOf(listOf("main"))
+    private var isNavigatingBack by mutableStateOf(false)
 
     // Broadcast receiver to handle app close signal
     private val closeAppReceiver = object : BroadcastReceiver() {
@@ -59,6 +65,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @OptIn(ExperimentalAnimationApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -87,26 +94,61 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    when (currentScreen) {
-                        "main" -> MainScreen(
-                            onNavigateToSettings = { currentScreen = "settings" },
-                            onNavigateToNotificationHistory = { currentScreen = "notification_history" }
-                        )
-                        "settings" -> SettingsScreen(
-                            onBackClick = { currentScreen = "main" }
-                        )
-                        "notification_history" -> NotificationHistoryScreen(
-                            onBackClick = { currentScreen = "main" },
-                            onNavigateToDetail = { notification ->
-                                selectedNotification = notification
-                                currentScreen = "notification_detail"
+                    AnimatedContent(
+                        targetState = currentScreen,
+                        transitionSpec = {
+                            if (isNavigatingBack) {
+                                // Back navigation: slide in from left, slide out to right
+                                slideInHorizontally(
+                                    initialOffsetX = { fullWidth -> -fullWidth },
+                                    animationSpec = tween(durationMillis = 300)
+                                ) + fadeIn() togetherWith slideOutHorizontally(
+                                    targetOffsetX = { fullWidth -> fullWidth },
+                                    animationSpec = tween(durationMillis = 300)
+                                ) + fadeOut()
+                            } else {
+                                // Forward navigation: slide in from right, slide out to left
+                                slideInHorizontally(
+                                    initialOffsetX = { fullWidth -> fullWidth },
+                                    animationSpec = tween(durationMillis = 300)
+                                ) + fadeIn() togetherWith slideOutHorizontally(
+                                    targetOffsetX = { fullWidth -> -fullWidth },
+                                    animationSpec = tween(durationMillis = 300)
+                                ) + fadeOut()
                             }
-                        )
-                        "notification_detail" -> selectedNotification?.let { notification ->
-                            NotificationDetailScreen(
-                                notification = notification,
-                                onBackClick = { currentScreen = "notification_history" }
+                        }
+                    ) { screen ->
+                        when (screen) {
+                            "main" -> MainScreen(
+                                onNavigateToSettings = {
+                                    navigateForward("settings")
+                                },
+                                onNavigateToNotificationHistory = {
+                                    navigateForward("notification_history")
+                                }
                             )
+                            "settings" -> SettingsScreen(
+                                onBackClick = {
+                                    navigateBack()
+                                }
+                            )
+                            "notification_history" -> NotificationHistoryScreen(
+                                onBackClick = {
+                                    navigateBack()
+                                },
+                                onNavigateToDetail = { notification ->
+                                    selectedNotification = notification
+                                    navigateForward("notification_detail")
+                                }
+                            )
+                            "notification_detail" -> selectedNotification?.let { notification ->
+                                NotificationDetailScreen(
+                                    notification = notification,
+                                    onBackClick = {
+                                        navigateBack()
+                                    }
+                                )
+                            }
                         }
                     }
                     if (showPermissionDialog && currentScreen == "main") {
@@ -148,6 +190,20 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    private fun navigateForward(destination: String) {
+        isNavigatingBack = false
+        navigationStack = navigationStack + destination
+        currentScreen = destination
+    }
+
+    private fun navigateBack() {
+        if (navigationStack.size > 1) {
+            isNavigatingBack = true
+            navigationStack = navigationStack.dropLast(1)
+            currentScreen = navigationStack.last()
         }
     }
 

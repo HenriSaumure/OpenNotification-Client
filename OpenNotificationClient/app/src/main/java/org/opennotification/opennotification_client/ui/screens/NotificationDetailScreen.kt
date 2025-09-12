@@ -2,6 +2,7 @@ package org.opennotification.opennotification_client.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -44,6 +45,11 @@ fun NotificationDetailScreen(
     val prefs by remember { mutableStateOf(context.getSharedPreferences("opennotification_settings", android.content.Context.MODE_PRIVATE)) }
     var isHistoryEnabled by remember {
         mutableStateOf(prefs.getBoolean("history_enabled", true))
+    }
+
+    // Handle back button press
+    BackHandler {
+        onBackClick()
     }
 
     Scaffold(
@@ -116,7 +122,7 @@ fun NotificationDetailScreen(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    
+
                     // Date
                     Text(
                         text = "Received on ${dateFormat.format(Date(notification.timestamp))}",
@@ -124,7 +130,7 @@ fun NotificationDetailScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                
+
                 // Alert Badge
                 if (notification.isAlert) {
                     Surface(
@@ -142,9 +148,9 @@ fun NotificationDetailScreen(
                     }
                 }
             }
-            
+
             Divider(modifier = Modifier.padding(bottom = 12.dp))
-            
+
 
 
             // WebSocket Source
@@ -158,19 +164,19 @@ fun NotificationDetailScreen(
             )
 
             // Description
-            notification.description?.let { description ->
+            notification.description?.takeIf { it.isNotBlank() }?.let { description ->
                 InfoSection(
                     title = "Description",
                     content = description,
                     maxLines = 10
                 )
             }
-            
+
             // Image
             notification.pictureLink?.let { pictureLink ->
                 if (pictureLink.isNotBlank()) {
                     SectionTitle(title = "Image")
-                    
+
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -194,16 +200,16 @@ fun NotificationDetailScreen(
                                 .padding(8.dp)
                         )
                     }
-                    
+
                     Spacer(modifier = Modifier.height(16.dp))
                 }
             }
-            
+
             // Action link
             notification.actionLink?.let { actionLink ->
                 if (actionLink.isNotBlank()) {
                     SectionTitle(title = "Action Link")
-                    
+
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -231,7 +237,7 @@ fun NotificationDetailScreen(
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
                             )
-                            
+
                             Icon(
                                 imageVector = Icons.Default.Launch,
                                 contentDescription = "Open link",
@@ -242,7 +248,7 @@ fun NotificationDetailScreen(
                     }
                 }
             }
-            
+
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
