@@ -197,6 +197,31 @@ class PermissionManager(private val context: Context) {
         }
     }
 
+    fun getBatteryOptimizationIntent(): Intent? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!powerManager.isIgnoringBatteryOptimizations(context.packageName)) {
+                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                }
+            } else {
+                null
+            }
+        } else {
+            null
+        }
+    }
+
+    fun getOverlayPermissionIntent(): Intent? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
+            Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+                data = Uri.parse("package:${context.packageName}")
+            }
+        } else {
+            null
+        }
+    }
+
     fun hasAllBackgroundPermissions(): Boolean {
         val batteryOptimized = isBatteryOptimizationIgnored()
         val notificationEnabled = isNotificationPermissionGranted()

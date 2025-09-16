@@ -35,8 +35,6 @@ import org.opennotification.opennotification_client.utils.PermissionManager
 import org.opennotification.opennotification_client.data.models.Notification
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 
 class MainActivity : ComponentActivity() {
     private lateinit var permissionManager: PermissionManager
@@ -56,15 +54,13 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { updatePermissionSummary() }
 
-    @Suppress("unused")
     private val batteryOptimizationLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) {
-        lifecycleScope.launch {
-            delay(500)
-            updatePermissionSummary()
-        }
-    }
+    ) { updatePermissionSummary() }
+
+    private val overlayPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { updatePermissionSummary() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -182,14 +178,26 @@ class MainActivity : ComponentActivity() {
                             },
                             onBatteryOptimizationRequest = {
                                 try {
-                                    permissionManager.requestIgnoreBatteryOptimization(this@MainActivity)
+                                    val intent = permissionManager.getBatteryOptimizationIntent()
+                                    if (intent != null) {
+                                        batteryOptimizationLauncher.launch(intent)
+                                    } else {
+                                        // Permission already granted or not needed
+                                        updatePermissionSummary()
+                                    }
                                 } catch (e: Exception) {
                                     permissionManager.openBatteryOptimizationSettings(this@MainActivity)
                                 }
                             },
                             onOverlayPermissionRequest = {
                                 try {
-                                    permissionManager.requestOverlayPermission(this@MainActivity)
+                                    val intent = permissionManager.getOverlayPermissionIntent()
+                                    if (intent != null) {
+                                        overlayPermissionLauncher.launch(intent)
+                                    } else {
+                                        // Permission already granted or not needed
+                                        updatePermissionSummary()
+                                    }
                                 } catch (e: Exception) {
                                     permissionManager.openAppSettings(this@MainActivity)
                                 }
