@@ -56,8 +56,16 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { updatePermissionSummary() }
 
-    @Suppress("unused")
     private val batteryOptimizationLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        lifecycleScope.launch {
+            delay(500)
+            updatePermissionSummary()
+        }
+    }
+
+    private val overlayPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
         lifecycleScope.launch {
@@ -182,16 +190,16 @@ class MainActivity : ComponentActivity() {
                             },
                             onBatteryOptimizationRequest = {
                                 try {
-                                    permissionManager.requestIgnoreBatteryOptimization(this@MainActivity)
+                                    permissionManager.requestIgnoreBatteryOptimization(this@MainActivity, batteryOptimizationLauncher)
                                 } catch (e: Exception) {
-                                    permissionManager.openBatteryOptimizationSettings(this@MainActivity)
+                                    permissionManager.openBatteryOptimizationSettings(this@MainActivity, batteryOptimizationLauncher)
                                 }
                             },
                             onOverlayPermissionRequest = {
                                 try {
-                                    permissionManager.requestOverlayPermission(this@MainActivity)
+                                    permissionManager.requestOverlayPermission(this@MainActivity, overlayPermissionLauncher)
                                 } catch (e: Exception) {
-                                    permissionManager.openAppSettings(this@MainActivity)
+                                    permissionManager.openAppSettings(this@MainActivity, overlayPermissionLauncher)
                                 }
                             },
                             onDismiss = {
@@ -224,6 +232,13 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Error updating permission summary", e)
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Check for permission changes when returning to the app
+        // This ensures UI updates even if activity result launchers don't work properly
+        updatePermissionSummary()
     }
 
     // Register the broadcast receiver

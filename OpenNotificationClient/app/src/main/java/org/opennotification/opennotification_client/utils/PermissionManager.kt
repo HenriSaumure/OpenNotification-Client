@@ -14,6 +14,7 @@ import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.activity.result.ActivityResultLauncher
 
 class PermissionManager(private val context: Context) {
     companion object {
@@ -88,7 +89,7 @@ class PermissionManager(private val context: Context) {
         }
     }
 
-    fun requestIgnoreBatteryOptimization(activity: Activity) {
+    fun requestIgnoreBatteryOptimization(activity: Activity, launcher: ActivityResultLauncher<Intent>? = null) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
             if (!powerManager.isIgnoringBatteryOptimizations(context.packageName)) {
@@ -98,11 +99,16 @@ class PermissionManager(private val context: Context) {
                     data = Uri.parse("package:${context.packageName}")
                 }
                 try {
-                    activity.startActivityForResult(intent, BATTERY_OPTIMIZATION_REQUEST_CODE)
-                    Log.i(TAG, "Opened battery optimization request dialog")
+                    if (launcher != null) {
+                        launcher.launch(intent)
+                        Log.i(TAG, "Launched battery optimization request with result launcher")
+                    } else {
+                        activity.startActivityForResult(intent, BATTERY_OPTIMIZATION_REQUEST_CODE)
+                        Log.i(TAG, "Opened battery optimization request dialog")
+                    }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to open battery optimization request dialog", e)
-                    openBatteryOptimizationSettings(activity)
+                    openBatteryOptimizationSettings(activity, launcher)
                 }
             } else {
                 Log.d(TAG, "Battery optimization already ignored")
@@ -127,7 +133,7 @@ class PermissionManager(private val context: Context) {
         }
     }
 
-    fun openBatteryOptimizationSettings(activity: Activity) {
+    fun openBatteryOptimizationSettings(activity: Activity, launcher: ActivityResultLauncher<Intent>? = null) {
         try {
             Log.i(TAG, "Opening battery optimization settings manually")
             val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -137,12 +143,21 @@ class PermissionManager(private val context: Context) {
                     data = Uri.parse("package:${context.packageName}")
                 }
             }
-            activity.startActivity(intent)
+            if (launcher != null) {
+                launcher.launch(intent)
+                Log.i(TAG, "Launched battery optimization settings with result launcher")
+            } else {
+                activity.startActivity(intent)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to open battery optimization settings", e)
             try {
                 val fallbackIntent = Intent(Settings.ACTION_SETTINGS)
-                activity.startActivity(fallbackIntent)
+                if (launcher != null) {
+                    launcher.launch(fallbackIntent)
+                } else {
+                    activity.startActivity(fallbackIntent)
+                }
             } catch (e2: Exception) {
                 Log.e(TAG, "Failed to open any settings", e2)
             }
@@ -171,27 +186,36 @@ class PermissionManager(private val context: Context) {
         }
     }
 
-    fun requestOverlayPermission(activity: Activity) {
+    fun requestOverlayPermission(activity: Activity, launcher: ActivityResultLauncher<Intent>? = null) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             try {
                 val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
                     data = Uri.parse("package:${context.packageName}")
                 }
-                activity.startActivity(intent)
-                Log.i(TAG, "Opened overlay permission settings")
+                if (launcher != null) {
+                    launcher.launch(intent)
+                    Log.i(TAG, "Launched overlay permission settings with result launcher")
+                } else {
+                    activity.startActivity(intent)
+                    Log.i(TAG, "Opened overlay permission settings")
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to open overlay permission settings", e)
-                openAppSettings(activity)
+                openAppSettings(activity, launcher)
             }
         }
     }
 
-    fun openAppSettings(activity: Activity) {
+    fun openAppSettings(activity: Activity, launcher: ActivityResultLauncher<Intent>? = null) {
         try {
             val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                 data = Uri.parse("package:${context.packageName}")
             }
-            activity.startActivity(intent)
+            if (launcher != null) {
+                launcher.launch(intent)
+            } else {
+                activity.startActivity(intent)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to open app settings", e)
         }
