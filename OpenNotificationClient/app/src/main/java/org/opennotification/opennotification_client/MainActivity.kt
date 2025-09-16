@@ -11,14 +11,18 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.*
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import com.google.gson.Gson
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.opennotification.opennotification_client.ui.screens.MainScreen
@@ -29,19 +33,16 @@ import org.opennotification.opennotification_client.ui.theme.OpenNotificationCli
 import org.opennotification.opennotification_client.ui.components.PermissionDialog
 import org.opennotification.opennotification_client.utils.PermissionManager
 import org.opennotification.opennotification_client.data.models.Notification
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 
 class MainActivity : ComponentActivity() {
     private lateinit var permissionManager: PermissionManager
     private var showPermissionDialog by mutableStateOf(false)
     private var permissionSummary by mutableStateOf(PermissionManager.PermissionSummary(false, false))
-    private var currentScreen by mutableStateOf("main")
-    private var selectedNotification by mutableStateOf<Notification?>(null)
 
-    // Navigation history and direction tracking
-    private var navigationStack by mutableStateOf(listOf("main"))
-    private var isNavigatingBack by mutableStateOf(false)
-
-    // Broadcast receiver to handle app close signal
     private val closeAppReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == "org.opennotification.opennotification_client.CLOSE_APP") {
@@ -65,7 +66,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @OptIn(ExperimentalAnimationApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -94,64 +94,79 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    AnimatedContent(
-                        targetState = currentScreen,
-                        transitionSpec = {
-                            if (isNavigatingBack) {
-                                // Back navigation: slide in from left, slide out to right
-                                slideInHorizontally(
-                                    initialOffsetX = { fullWidth -> -fullWidth },
-                                    animationSpec = tween(durationMillis = 300)
-                                ) + fadeIn() togetherWith slideOutHorizontally(
-                                    targetOffsetX = { fullWidth -> fullWidth },
-                                    animationSpec = tween(durationMillis = 300)
-                                ) + fadeOut()
-                            } else {
-                                // Forward navigation: slide in from right, slide out to left
-                                slideInHorizontally(
-                                    initialOffsetX = { fullWidth -> fullWidth },
-                                    animationSpec = tween(durationMillis = 300)
-                                ) + fadeIn() togetherWith slideOutHorizontally(
-                                    targetOffsetX = { fullWidth -> -fullWidth },
-                                    animationSpec = tween(durationMillis = 300)
-                                ) + fadeOut()
-                            }
-                        }
-                    ) { screen ->
-                        when (screen) {
-                            "main" -> MainScreen(
+                    val navController = rememberNavController()
+
+                    NavHost(
+                        navController = navController,
+                        startDestination = "main",
+
+                        enterTransition = { androidx.compose.animation.EnterTransition.None },
+                        exitTransition = { androidx.compose.animation.ExitTransition.None }
+                    ) {
+                        composable("main") {
+                            MainScreen(
                                 onNavigateToSettings = {
-                                    navigateForward("settings")
+                                    navController.navigate("settings")
                                 },
                                 onNavigateToNotificationHistory = {
-                                    navigateForward("notification_history")
+                                    navController.navigate("notification_history")
                                 }
                             )
-                            "settings" -> SettingsScreen(
+                        }
+
+                        composable("settings") {
+                            SettingsScreen(
                                 onBackClick = {
-                                    navigateBack()
+                                    navController.popBackStack()
                                 }
                             )
-                            "notification_history" -> NotificationHistoryScreen(
+                        }
+
+                        composable("notification_history") {
+                            NotificationHistoryScreen(
                                 onBackClick = {
-                                    navigateBack()
+                                    navController.popBackStack()
                                 },
                                 onNavigateToDetail = { notification ->
-                                    selectedNotification = notification
-                                    navigateForward("notification_detail")
+                                    val gson = Gson()
+                                    val notificationJson = gson.toJson(notification)
+                                    val encodedJson = URLEncoder.encode(notificationJson, StandardCharsets.UTF_8.toString())
+                                    navController.navigate("notification_detail/$encodedJson")
                                 }
                             )
-                            "notification_detail" -> selectedNotification?.let { notification ->
+                        }
+
+                        composable(
+                            route = "notification_detail/{notificationJson}",
+                            arguments = listOf(
+                                navArgument("notificationJson") {
+                                    type = NavType.StringType
+                                }
+                            )
+                        ) { backStackEntry ->
+                            val notificationJson = backStackEntry.arguments?.getString("notificationJson") ?: return@composable
+                            val gson = Gson()
+                            val notification = try {
+                                gson.fromJson(
+                                    java.net.URLDecoder.decode(notificationJson, StandardCharsets.UTF_8.toString()),
+                                    Notification::class.java
+                                )
+                            } catch (e: Exception) {
+                                null
+                            }
+
+                            notification?.let {
                                 NotificationDetailScreen(
-                                    notification = notification,
+                                    notification = it,
                                     onBackClick = {
-                                        navigateBack()
+                                        navController.popBackStack()
                                     }
                                 )
                             }
                         }
                     }
-                    if (showPermissionDialog && currentScreen == "main") {
+
+                    if (showPermissionDialog && navController.currentBackStackEntry?.destination?.route == "main") {
                         PermissionDialog(
                             permissionSummary = permissionSummary,
                             onNotificationPermissionRequest = {
@@ -190,38 +205,6 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-        }
-    }
-
-    private fun navigateForward(destination: String) {
-        isNavigatingBack = false
-        navigationStack = navigationStack + destination
-        currentScreen = destination
-    }
-
-    private fun navigateBack() {
-        if (navigationStack.size > 1) {
-            isNavigatingBack = true
-            navigationStack = navigationStack.dropLast(1)
-            currentScreen = navigationStack.last()
-        }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        updatePermissionSummary()
-        permissionManager.checkAndNotifyPermissionChanges()
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == PermissionManager.NOTIFICATION_PERMISSION_REQUEST_CODE) {
-            updatePermissionSummary()
         }
     }
 

@@ -326,6 +326,14 @@ class WebSocketService : Service() {
             isStoppingSelf = true
             Log.i(TAG, "Shutting down WebSocketService and stopping application")
 
+            // Ensure the service exits foreground mode immediately
+            if (runningAsForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                Log.i(TAG, "Stopping foreground service immediately")
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                runningAsForeground = false
+                isForegroundServiceActive = false
+            }
+
             // Stop keep-alive monitoring
             org.opennotification.opennotification_client.utils.ConnectionKeepAlive.stopKeepAlive(applicationContext)
 
@@ -340,91 +348,86 @@ class WebSocketService : Service() {
                 Log.e(TAG, "Error stopping memory pressure handler", e)
             }
 
-            // Cancel any pending alarms related to this app
-            try {
-                val alarmManager = getSystemService(ALARM_SERVICE) as android.app.AlarmManager
+            // Cancel any pending alarms related to this app - but don't block for this
+            serviceScope.launch(Dispatchers.IO) {
+                try {
+                    val alarmManager = getSystemService(ALARM_SERVICE) as android.app.AlarmManager
 
-                // Cancel keep-alive alarms
-                val keepAliveIntent = Intent(applicationContext, org.opennotification.opennotification_client.utils.KeepAliveReceiver::class.java)
-                val keepAlivePendingIntent = PendingIntent.getBroadcast(
-                    applicationContext, 1001, keepAliveIntent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-                alarmManager.cancel(keepAlivePendingIntent)
+                    // Cancel keep-alive alarms
+                    val keepAliveIntent = Intent(applicationContext, org.opennotification.opennotification_client.utils.KeepAliveReceiver::class.java)
+                    val keepAlivePendingIntent = PendingIntent.getBroadcast(
+                        applicationContext, 1001, keepAliveIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    alarmManager.cancel(keepAlivePendingIntent)
 
-                // Cancel resurrection alarms
-                val resurrectionIntent = Intent(applicationContext, org.opennotification.opennotification_client.utils.ResurrectionReceiver::class.java)
-                val resurrectionPendingIntent = PendingIntent.getBroadcast(
-                    applicationContext, 2001, resurrectionIntent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-                alarmManager.cancel(resurrectionPendingIntent)
+                    // Cancel resurrection alarms
+                    val resurrectionIntent = Intent(applicationContext, org.opennotification.opennotification_client.utils.ResurrectionReceiver::class.java)
+                    val resurrectionPendingIntent = PendingIntent.getBroadcast(
+                        applicationContext, 2001, resurrectionIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    alarmManager.cancel(resurrectionPendingIntent)
 
-                // Cancel service restart alarms
-                val restartIntent = Intent(applicationContext, WebSocketService::class.java)
-                val restartPendingIntent = PendingIntent.getService(
-                    applicationContext, 3002, restartIntent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-                alarmManager.cancel(restartPendingIntent)
+                    // Cancel service restart alarms
+                    val restartIntent = Intent(applicationContext, WebSocketService::class.java)
+                    val restartPendingIntent = PendingIntent.getService(
+                        applicationContext, 3002, restartIntent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    alarmManager.cancel(restartPendingIntent)
 
-                Log.i(TAG, "Cancelled all pending alarms")
-            } catch (e: Exception) {
-                Log.e(TAG, "Error cancelling alarms", e)
+                    Log.i(TAG, "Cancelled all pending alarms")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error cancelling alarms", e)
+                }
             }
 
-            // Stop overlay service if running
-            try {
-                val overlayServiceIntent = Intent(applicationContext, org.opennotification.opennotification_client.service.FullScreenOverlayService::class.java)
-                stopService(overlayServiceIntent)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error stopping overlay service", e)
+            // Stop overlay service if running - in background
+            serviceScope.launch(Dispatchers.IO) {
+                try {
+                    val overlayServiceIntent = Intent(applicationContext, org.opennotification.opennotification_client.service.FullScreenOverlayService::class.java)
+                    stopService(overlayServiceIntent)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error stopping overlay service", e)
+                }
             }
 
-            // Clear all notifications
-            try {
-                notificationManager.cancelAll()
-                Log.i(TAG, "Cleared all notifications")
-            } catch (e: Exception) {
-                Log.e(TAG, "Error clearing notifications", e)
+            // Clear all notifications - in background
+            serviceScope.launch(Dispatchers.IO) {
+                try {
+                    notificationManager.cancelAll()
+                    Log.i(TAG, "Cleared all notifications")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error clearing notifications", e)
+                }
             }
 
-            // Send broadcast to close MainActivity if it's running
-            try {
-                val closeAppIntent = Intent("org.opennotification.opennotification_client.CLOSE_APP")
-                sendBroadcast(closeAppIntent)
-                Log.i(TAG, "Sent close app broadcast")
-            } catch (e: Exception) {
-                Log.e(TAG, "Error sending close app broadcast", e)
+            // Send broadcast to close MainActivity if it's running - in background
+            serviceScope.launch(Dispatchers.IO) {
+                try {
+                    val closeAppIntent = Intent("org.opennotification.opennotification_client.CLOSE_APP")
+                    sendBroadcast(closeAppIntent)
+                    Log.i(TAG, "Sent close app broadcast")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error sending close app broadcast", e)
+                }
             }
 
-            // Cancel service scope
-            serviceScope.cancel()
-
-            // Stop the service
+            // Stop the service IMMEDIATELY
+            Log.i(TAG, "Stopping WebSocketService immediately")
             stopSelf()
 
-            Log.i(TAG, "WebSocketService shutdown completed - killing process now")
-            Log.w(TAG, "========================== TERMINATING APPLICATION PROCESS ==========================")
-
-            // Force terminate the application process immediately to ensure clean shutdown
-            try {
-                android.os.Process.killProcess(android.os.Process.myPid())
-            } catch (e: Exception) {
-                Log.e(TAG, "Error killing process", e)
-                // Fallback: exit the entire application
-                kotlin.system.exitProcess(0)
-            }
+            // Let the service stop naturally, without forcing process termination
+            Log.i(TAG, "WebSocketService shutdown initiated")
 
         } catch (e: Exception) {
             Log.e(TAG, "Error during shutdown", e)
-            // Still try to terminate the process even if cleanup fails
-            try {
-                Log.w(TAG, "========================== FORCE TERMINATING AFTER ERROR ==========================")
-                android.os.Process.killProcess(android.os.Process.myPid())
-            } catch (ex: Exception) {
-                kotlin.system.exitProcess(1)
+            // In case of error, always try to stop the service
+            if (runningAsForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
             }
+            stopSelf()
         }
     }
 
