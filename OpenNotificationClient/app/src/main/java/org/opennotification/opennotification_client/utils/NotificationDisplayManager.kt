@@ -98,10 +98,25 @@ class NotificationDisplayManager(private val context: Context) {
                 Log.i(TAG, "Processing as REGULAR NOTIFICATION - isAlert flag is false")
             }
 
-            val intent = Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                putExtra("notification_id", notification.id)
-                putExtra("guid", notification.guid)
+            // Create the appropriate intent based on whether there's an action link
+            val intent = if (!notification.actionLink.isNullOrBlank()) {
+                // If there's an action link, use it as the primary click target
+                if (isUrl(notification.actionLink)) {
+                    // Handle as URL - open in browser
+                    Log.d(TAG, "Notification click will open URL: ${notification.actionLink}")
+                    createBrowserIntent(notification.actionLink)
+                } else {
+                    // Handle as package name - try to launch app
+                    Log.d(TAG, "Notification click will open app: ${notification.actionLink}")
+                    createAppLaunchIntent(notification.actionLink)
+                }
+            } else {
+                // No action link, use default behavior (open MainActivity)
+                Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    putExtra("notification_id", notification.id)
+                    putExtra("guid", notification.guid)
+                }
             }
 
             val pendingIntent = PendingIntent.getActivity(
@@ -309,9 +324,24 @@ class NotificationDisplayManager(private val context: Context) {
 
     private fun addActionButton(builder: NotificationCompat.Builder, notification: Notification) {
         try {
-            val actionIntent = Intent(Intent.ACTION_VIEW).apply {
-                data = Uri.parse(notification.actionLink)
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            val actionLink = notification.actionLink
+
+            if (actionLink.isNullOrBlank()) {
+                Log.w(TAG, "ActionLink is null or blank, cannot add action button")
+                return
+            }
+
+            Log.d(TAG, "Adding action button for actionLink: $actionLink")
+
+            // Determine if actionLink is a URL or package name
+            val actionIntent = if (isUrl(actionLink)) {
+                // Handle as URL - open in browser
+                Log.d(TAG, "ActionLink is a URL, creating browser intent")
+                createBrowserIntent(actionLink)
+            } else {
+                // Handle as package name - try to launch app
+                Log.d(TAG, "ActionLink is a package name, creating app launch intent")
+                createAppLaunchIntent(actionLink)
             }
 
             val actionPendingIntent = PendingIntent.getActivity(
@@ -325,15 +355,92 @@ class NotificationDisplayManager(private val context: Context) {
                 }
             )
 
+            val buttonText = if (isUrl(actionLink)) "Open Link" else "Open App"
             builder.addAction(
                 R.drawable.ic_notification,
-                "Open Link",
+                buttonText,
                 actionPendingIntent
             )
 
-            Log.d(TAG, "Added action button for: ${notification.actionLink}")
+            Log.d(TAG, "Added action button: $buttonText")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to add action button", e)
+        }
+    }
+
+    private fun isUrl(text: String): Boolean {
+        return try {
+            // Check if it's a valid URL by looking for common URL patterns
+            text.startsWith("http://", ignoreCase = true) ||
+            text.startsWith("https://", ignoreCase = true) ||
+            text.startsWith("ftp://", ignoreCase = true) ||
+            text.contains("://") ||
+            (text.contains(".") && (text.contains(".com") || text.contains(".org") ||
+             text.contains(".net") || text.contains(".edu") || text.contains(".gov") ||
+             text.contains(".io") || text.contains(".co")))
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun createBrowserIntent(url: String): Intent {
+        return try {
+            // Ensure URL has a protocol
+            val formattedUrl = if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                "https://$url"
+            } else {
+                url
+            }
+
+            Log.d(TAG, "Creating browser intent for URL: $formattedUrl")
+            Intent(Intent.ACTION_VIEW).apply {
+                data = Uri.parse(formattedUrl)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to create browser intent for URL: $url", e)
+            // Fallback to error intent
+            createErrorIntent(url)
+        }
+    }
+
+    private fun createAppLaunchIntent(packageName: String): Intent {
+        return try {
+            // Try to get the launch intent for the package
+            val packageManager = context.packageManager
+            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+
+            if (launchIntent != null) {
+                Log.d(TAG, "Found launch intent for package: $packageName")
+                launchIntent.apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                }
+            } else {
+                Log.w(TAG, "App not installed for package: $packageName")
+                // Create an intent to show a "not installed" message
+                createNotInstalledIntent(packageName)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to create launch intent for package: $packageName", e)
+            // Create an intent to show an error message
+            createErrorIntent(packageName)
+        }
+    }
+
+    private fun createNotInstalledIntent(packageName: String): Intent {
+        return Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("show_toast", "App not installed: $packageName")
+            putExtra("package_name", packageName)
+        }
+    }
+
+    private fun createErrorIntent(packageName: String): Intent {
+        return Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("show_toast", "Failed to open app: $packageName")
+            putExtra("package_name", packageName)
         }
     }
 
